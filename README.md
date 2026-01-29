@@ -25,14 +25,19 @@ x-insight/
 │   │   ├── advanced.py             # HDBSCAN, GMM, Spectral
 │   │   └── validation.py           # Clustering metrics and evaluation
 │   ├── explainability/
-│   │   └── global_explainability.py  # Feature importance, cluster profiling
+│   │   ├── global_explainability.py  # Feature importance, cluster profiling
+│   │   └── local_explainability.py   # Patient-level explanations (SHAP, LIME)
+│   ├── counterfactuals/
+│   │   └── counterfactual_explanations.py  # What-if scenarios, DiCE
 │   └── visualization/
 │       ├── dimensionality_reduction.py  # PCA, t-SNE, UMAP
 │       └── plots.py                # Visualization functions
 └── tests/                          # Unit tests
     ├── test_preprocessing.py
     ├── test_clustering.py
-    └── test_explainability.py
+    ├── test_explainability.py
+    ├── test_local_explainability.py
+    └── test_counterfactual.py
 ```
 
 ## Features
@@ -62,18 +67,35 @@ x-insight/
 - Radar charts for cluster profiles
 
 ### Explainability
+
+#### Global Explainability
 - Global feature importance (Surrogate Trees, Permutation, SHAP)
 - Cluster profiling with statistical summaries
 - Contrastive analysis (cluster vs global mean)
 - Decision rule extraction from surrogate trees
 - Interactive visualizations for interpretability
 
+#### Local Explainability
+- Patient-level explanations with SHAP values
+- LIME explanations for individual cluster assignments
+- Distance-to-centroid analysis (feature contributions)
+- Probabilistic membership explanations (soft assignments)
+- Combined multi-method explanations per patient
+
+#### Counterfactual Explanations
+- DiCE-style diverse counterfactual generation
+- Optimization-based minimal feature changes
+- Clinical constraint management (ranges, immutability)
+- What-if scenario analysis for cluster transitions
+- Multiple diverse alternatives for actionable insights
+
 ### Web Interface
 - Streamlit-based interactive application
 - Five main sections: Data, Preprocessing, Clustering, Visualization, Explainability
 - Data upload and exploration
 - Real-time clustering and visualization
-- Comprehensive explainability analysis
+- Global and local explainability analysis
+- Patient-level explanations and counterfactual scenarios
 - Downloadable results
 
 ## Installation
@@ -120,7 +142,12 @@ The application will be available at `http://localhost:8501`
 pytest tests/ -v
 ```
 
-All 43 tests currently pass (11 preprocessing, 22 clustering, 10 explainability).
+All 72 tests currently pass:
+- 11 preprocessing tests
+- 22 clustering tests
+- 10 global explainability tests
+- 12 local explainability tests
+- 17 counterfactual explanation tests
 
 ### Implemented
 - Complete data preprocessing pipeline
@@ -128,12 +155,14 @@ All 43 tests currently pass (11 preprocessing, 22 clustering, 10 explainability)
 - Comprehensive validation metrics
 - Multiple dimensionality reduction methods (PCA, t-SNE, UMAP)
 - Global explainability module with feature importance and decision rules
+- Local explainability with SHAP, LIME, and distance-based methods
+- Counterfactual explanations with clinical constraints (DiCE-style)
 - Interactive web interface with 5 tabs
-- Full test coverage (43 unit tests)
+- Comprehensive test coverage (72 unit tests)
 
 ### In Development
-- Local explainability (LIME, instance-level explanations)
-- Counterfactual generation
+- Integration of local explainability into Streamlit interface
+- Integration of counterfactual explanations into Streamlit interface
 - LLM integration for natural language explanations
 - Deep clustering methods
 - REST API
@@ -142,7 +171,7 @@ All 43 tests currently pass (11 preprocessing, 22 clustering, 10 explainability)
 
 - Core: Python 3.12, NumPy, Pandas
 - Machine Learning: scikit-learn, scipy
-- Explainability: SHAP, scikit-learn (surrogate models, permutation importance)
+- Explainability: SHAP, LIME, DiCE (counterfactuals), scikit-learn (surrogate models)
 - Visualization: Matplotlib, Seaborn, Plotly
 - Web Interface: Streamlit
 - Testing: pytest

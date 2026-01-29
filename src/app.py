@@ -38,7 +38,21 @@ from explainability import (
     plot_cluster_radar,
     plot_shap_summary,
     plot_feature_importance_comparison,
-    extract_decision_rules
+    extract_decision_rules,
+    explain_patient,
+    plot_shap_explanation,
+    plot_lime_explanation,
+    plot_distance_explanation,
+    plot_probabilistic_explanation,
+    plot_patient_explanation_summary
+)
+from counterfactuals import (
+    ClinicalConstraints,
+    generate_counterfactual_optimization,
+    generate_counterfactual_dice_style,
+    format_counterfactual_explanation,
+    plot_counterfactual_comparison,
+    plot_diverse_counterfactuals
 )
 
 # Page configuration
@@ -100,7 +114,15 @@ else:
 df = st.session_state.df
 
 # Tabs
-tab1, tab2, tab3, tab4, tab5 = st.tabs(["📊 Data Overview", "🔧 Preprocessing", "🎯 Clustering", "📈 Visualization", "🔍 Explainability"])
+tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+    "📊 Data Overview", 
+    "🔧 Preprocessing", 
+    "🎯 Clustering", 
+    "📈 Visualization", 
+    "🔍 Global Explainability",
+    "👤 Local Explainability",
+    "🔄 Counterfactuals"
+])
 
 # TAB 1: Data Overview
 with tab1:
@@ -334,7 +356,7 @@ with tab4:
                 fig_radar, _ = plot_radar_chart(profiles)
                 st.pyplot(fig_radar)
 
-# TAB 5: Explainability
+# TAB 5: Global Explainability
 with tab5:
     st.header("Global Explainability")
     
@@ -456,6 +478,282 @@ with tab5:
             plot_tree(tree, feature_names=feature_names, class_names=class_names,
                      filled=True, rounded=True, ax=ax, fontsize=10)
             st.pyplot(fig)
+
+# TAB 6: Local Explainability
+with tab6:
+    st.header("Local Explainability - Patient-Level Explanations")
+    
+    if 'labels' not in st.session_state or 'X_scaled' not in st.session_state:
+        st.warning("⚠️ Please run clustering first (Tab 3)")
+        st.stop()
+    
+    X_scaled = st.session_state.X_scaled
+    labels = st.session_state.labels
+    df_imputed = st.session_state.df_imputed
+    feature_names = st.session_state.selected_features
+    model = st.session_state.model
+    
+    st.subheader("Patient Selection")
+    
+    col1, col2 = st.columns([2, 1])
+    
+    with col1:
+        patient_id_col = 'Patient_ID' if 'Patient_ID' in df.columns else None
+        if patient_id_col:
+            patient_ids = df[patient_id_col].values
+            selected_patient_id = st.selectbox(
+                "Select Patient",
+                patient_ids,
+                format_func=lambda x: f"Patient {x} - Cluster {labels[np.where(patient_ids == x)[0][0]]}"
+            )
+            patient_idx = np.where(patient_ids == selected_patient_id)[0][0]
+        else:
+            patient_idx = st.number_input("Patient Index", 0, len(labels)-1, 0)
+    
+    with col2:
+        st.metric("Patient Cluster", labels[patient_idx])
+        st.metric("Total Features", len(feature_names))
+    
+    explanation_methods = st.multiselect(
+        "Explanation Methods",
+        ["SHAP", "LIME", "Distance to Centroid", "Probabilistic Membership"],
+        default=["SHAP", "Distance to Centroid"]
+    )
+    
+    if st.button("Explain Patient Assignment", type="primary"):
+        with st.spinner("Generating patient explanations..."):
+            method_map = {
+                "SHAP": "shap",
+                "LIME": "lime",
+                "Distance to Centroid": "distance",
+                "Probabilistic Membership": "probabilistic"
+            }
+            
+            selected_methods = [method_map[m] for m in explanation_methods]
+            
+            explanations = explain_patient(
+                X_scaled, labels, patient_idx, model,
+                methods=selected_methods,
+                feature_names=feature_names
+            )
+            
+            st.session_state.patient_explanations = explanations
+            st.session_state.explained_patient_idx = patient_idx
+            
+            st.success(f"✅ Explanations generated for Patient {patient_idx}")
+            
+            # Display summary
+            st.subheader("Explanation Summary")
+            fig_summary = plot_patient_explanation_summary(explanations, top_n=8)
+            st.pyplot(fig_summary)
+            
+            # Display individual explanations
+            st.subheader("Detailed Explanations")
+            
+            if 'shap' in explanations and 'error' not in explanations['shap']:
+                with st.expander("🔍 SHAP Explanation", expanded=True):
+                    st.write("**SHAP values show how each feature contributes to the cluster assignment**")
+                    fig_shap = plot_shap_explanation(explanations['shap'], top_n=10)
+                    st.pyplot(fig_shap)
+                    
+                    st.write("**Feature Values vs SHAP Impact**")
+                    shap_vals = np.asarray(explanations['shap']['shap_values']).flatten()
+                    feature_vals = np.asarray(explanations['shap']['feature_values']).flatten()
+                    n_vals = min(len(shap_vals), len(feature_vals), len(feature_names))
+                    shap_data = pd.DataFrame({
+                        'Feature': feature_names[:n_vals],
+                        'Value': feature_vals[:n_vals],
+                        'SHAP Impact': shap_vals[:n_vals]
+                    })
+                    shap_data['Abs Impact'] = np.abs(shap_data['SHAP Impact'])
+                    shap_data = shap_data.sort_values('Abs Impact', ascending=False)
+                    st.dataframe(shap_data.head(10))
+            
+            if 'lime' in explanations and 'error' not in explanations['lime']:
+                with st.expander("🍋 LIME Explanation"):
+                    st.write("**LIME explains the cluster assignment locally**")
+                    fig_lime = plot_lime_explanation(explanations['lime'], top_n=10)
+                    st.pyplot(fig_lime)
+            
+            if 'distance' in explanations and 'error' not in explanations['distance']:
+                with st.expander("📏 Distance to Centroid Explanation", expanded=True):
+                    st.write("**Distance-based explanation shows which features differ most from cluster center**")
+                    fig_dist = plot_distance_explanation(explanations['distance'], top_n=10)
+                    st.pyplot(fig_dist)
+                    
+                    st.metric("Total Distance to Centroid", f"{explanations['distance']['total_distance']:.3f}")
+                    
+                    st.write("**Top Contributing Features**")
+                    dist_data = pd.DataFrame({
+                        'Feature': feature_names,
+                        'Patient Value': explanations['distance']['patient_values'],
+                        'Centroid Value': explanations['distance']['centroid_values'],
+                        'Distance': explanations['distance']['feature_distances'],
+                        'Contribution %': explanations['distance']['feature_contributions'] * 100
+                    })
+                    dist_data = dist_data.sort_values('Contribution %', ascending=False)
+                    st.dataframe(dist_data.head(10))
+            
+            if 'probabilistic' in explanations and 'error' not in explanations['probabilistic']:
+                with st.expander("📊 Probabilistic Membership Explanation"):
+                    st.write("**Cluster membership probabilities**")
+                    fig_prob = plot_probabilistic_explanation(explanations['probabilistic'])
+                    st.plotly_chart(fig_prob, use_container_width=True)
+                    
+                    st.metric("Membership Certainty", f"{explanations['probabilistic']['membership_certainty']:.2%}")
+                    
+                    st.write("**Distances to All Cluster Centers**")
+                    prob_data = pd.DataFrame({
+                        'Cluster': range(len(explanations['probabilistic']['probabilities'])),
+                        'Probability': explanations['probabilistic']['probabilities'],
+                        'Distance': explanations['probabilistic']['distances_to_centers']
+                    })
+                    st.dataframe(prob_data)
+
+# TAB 7: Counterfactual Explanations
+with tab7:
+    st.header("Counterfactual Explanations - What-If Scenarios")
+    
+    if 'labels' not in st.session_state or 'X_scaled' not in st.session_state:
+        st.warning("⚠️ Please run clustering first (Tab 3)")
+        st.stop()
+    
+    X_scaled = st.session_state.X_scaled
+    labels = st.session_state.labels
+    df_imputed = st.session_state.df_imputed
+    feature_names = st.session_state.selected_features
+    model = st.session_state.model
+    
+    st.subheader("Patient and Target Selection")
+    
+    col1, col2, col3 = st.columns(3)
+    
+    with col1:
+        patient_id_col = 'Patient_ID' if 'Patient_ID' in df.columns else None
+        if patient_id_col:
+            patient_ids = df[patient_id_col].values
+            selected_patient_id = st.selectbox(
+                "Select Patient",
+                patient_ids,
+                format_func=lambda x: f"Patient {x} - Cluster {labels[np.where(patient_ids == x)[0][0]]}",
+                key="cf_patient"
+            )
+            patient_idx = np.where(patient_ids == selected_patient_id)[0][0]
+        else:
+            patient_idx = st.number_input("Patient Index", 0, len(labels)-1, 0, key="cf_patient_idx")
+    
+    with col2:
+        current_cluster = labels[patient_idx]
+        st.metric("Current Cluster", current_cluster)
+        
+        available_clusters = [c for c in np.unique(labels) if c != current_cluster]
+        target_cluster = st.selectbox("Target Cluster", available_clusters)
+    
+    with col3:
+        cf_method = st.selectbox(
+            "Generation Method",
+            ["DiCE-Style (Fast)", "Optimization-Based"]
+        )
+        
+        n_counterfactuals = st.slider("Number of Counterfactuals", 1, 5, 3)
+    
+    st.subheader("Clinical Constraints (Optional)")
+    
+    with st.expander("Configure Constraints"):
+        st.write("Set constraints to ensure clinically plausible counterfactuals")
+        
+        constraints = ClinicalConstraints(feature_names)
+        
+        st.write("**Feature Ranges**")
+        constraint_features = st.multiselect(
+            "Features with constraints",
+            feature_names,
+            default=[]
+        )
+        
+        for feat in constraint_features:
+            col1, col2 = st.columns(2)
+            with col1:
+                min_val = st.number_input(f"{feat} - Min", value=0.0, key=f"min_{feat}")
+            with col2:
+                max_val = st.number_input(f"{feat} - Max", value=100.0, key=f"max_{feat}")
+            constraints.set_range(feat, min_val, max_val)
+        
+        st.write("**Immutable Features**")
+        immutable_features = st.multiselect(
+            "Features that cannot change (e.g., Age, Gender)",
+            feature_names,
+            default=[]
+        )
+        
+        for feat in immutable_features:
+            constraints.set_immutable(feat)
+    
+    use_constraints = len(constraint_features) > 0 or len(immutable_features) > 0
+    
+    if st.button("Generate Counterfactuals", type="primary"):
+        with st.spinner(f"Generating {n_counterfactuals} counterfactual(s)..."):
+            if cf_method == "DiCE-Style (Fast)":
+                counterfactuals = generate_counterfactual_dice_style(
+                    X_scaled, labels, patient_idx, model,
+                    target_cluster=target_cluster,
+                    constraints=constraints if use_constraints else None,
+                    n_counterfactuals=n_counterfactuals
+                )
+            else:
+                from counterfactuals import generate_diverse_counterfactuals
+                counterfactuals = generate_diverse_counterfactuals(
+                    X_scaled, labels, patient_idx, model,
+                    target_cluster=target_cluster,
+                    constraints=constraints if use_constraints else None,
+                    n_counterfactuals=n_counterfactuals
+                )
+            
+            st.session_state.counterfactuals = counterfactuals
+            
+            if counterfactuals:
+                st.success(f"✅ Generated {len(counterfactuals)} valid counterfactual(s)")
+                
+                st.subheader("Counterfactual Scenarios")
+                
+                for idx, cf in enumerate(counterfactuals):
+                    with st.expander(f"Counterfactual #{idx+1} - Distance: {cf['distance']:.3f}", expanded=(idx==0)):
+                        explanation_text = format_counterfactual_explanation(cf, feature_names)
+                        st.info(explanation_text)
+                        
+                        col1, col2 = st.columns(2)
+                        
+                        with col1:
+                            st.metric("Number of Changes", cf['n_changes'])
+                            st.metric("Distance", f"{cf['distance']:.3f}")
+                        
+                        with col2:
+                            st.metric("Original Cluster", cf['original_cluster'])
+                            st.metric("New Cluster", cf['predicted_cluster'])
+                        
+                        st.write("**Visual Comparison**")
+                        fig_cf = plot_counterfactual_comparison(cf, feature_names, top_n=10)
+                        st.pyplot(fig_cf)
+                        
+                        st.write("**Detailed Changes**")
+                        changes_data = []
+                        for feat_idx in cf['feature_changes']:
+                            changes_data.append({
+                                'Feature': feature_names[feat_idx],
+                                'Original': cf['original'][feat_idx],
+                                'Counterfactual': cf['counterfactual'][feat_idx],
+                                'Change': cf['changes'][feat_idx],
+                                'Change %': (cf['changes'][feat_idx] / (cf['original'][feat_idx] + 1e-10) * 100)
+                            })
+                        changes_df = pd.DataFrame(changes_data)
+                        st.dataframe(changes_df)
+                
+                if len(counterfactuals) > 1:
+                    st.subheader("Comparison of Counterfactuals")
+                    fig_diverse = plot_diverse_counterfactuals(counterfactuals, feature_names, top_n=8)
+                    st.plotly_chart(fig_diverse, use_container_width=True)
+            else:
+                st.error("❌ Could not generate valid counterfactuals. Try relaxing constraints or changing target cluster.")
 
 # Footer
 st.markdown("---")
