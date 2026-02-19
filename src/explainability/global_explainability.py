@@ -210,16 +210,17 @@ def plot_cluster_comparison_bars(profiles, feature_cols=None, figsize=(14, 6)):
     
     means = profiles.xs('mean', level=1, axis=1)[feature_cols]
     
-    colors = px.colors.qualitative.Set2[:len(means)]
+    colors = px.colors.qualitative.Set2
     
     fig = go.Figure()
     
     for idx, (cluster, row) in enumerate(means.iterrows()):
+        color = colors[idx % len(colors)]
         fig.add_trace(go.Bar(
             name=f'Cluster {cluster}',
             x=feature_cols,
             y=row.values,
-            marker=dict(color=colors[idx], line=dict(color='white', width=1.5)),
+            marker=dict(color=color, line=dict(color='white', width=1.5)),
             text=row.round(2).values,
             textposition='outside',
             hovertemplate='<b>Cluster %{fullData.name}</b><br>Feature: %{x}<br>Mean: %{y:.3f}<extra></extra>'
@@ -368,18 +369,19 @@ def plot_cluster_radar(profiles, feature_cols=None, normalize=True):
     else:
         means_norm = means
     
-    colors = px.colors.qualitative.Set2[:len(means_norm)]
+    colors = px.colors.qualitative.Set2
     
     fig = go.Figure()
     
     for idx, (cluster, row) in enumerate(means_norm.iterrows()):
+        color = colors[idx % len(colors)]
         fig.add_trace(go.Scatterpolar(
             r=row.values.tolist() + [row.values[0]],
             theta=feature_cols + [feature_cols[0]],
             fill='toself',
             name=f'Cluster {cluster}',
-            line=dict(color=colors[idx], width=2),
-            fillcolor=colors[idx],
+            line=dict(color=color, width=2),
+            fillcolor=color,
             opacity=0.3,
             hovertemplate='<b>Cluster %{fullData.name}</b><br>Feature: %{theta}<br>Value: %{r:.3f}<extra></extra>'
         ))
@@ -538,16 +540,17 @@ def plot_feature_importance_comparison(importance_dict, top_n=10):
     pivot_df = pivot_df.sort_values('Mean', ascending=False).head(top_n)
     pivot_df = pivot_df.drop('Mean', axis=1)
     
-    colors = px.colors.qualitative.Plotly[:len(pivot_df.columns)]
+    colors = px.colors.qualitative.Plotly
     
     fig = go.Figure()
     
     for idx, method in enumerate(pivot_df.columns):
+        color = colors[idx % len(colors)]
         fig.add_trace(go.Bar(
             name=method,
             x=pivot_df.index,
             y=pivot_df[method].values,
-            marker=dict(color=colors[idx], line=dict(color='white', width=1)),
+            marker=dict(color=color, line=dict(color='white', width=1)),
             text=pivot_df[method].round(3).values,
             textposition='outside',
             hovertemplate=f'<b>{method}</b><br>Feature: %{{x}}<br>Importance: %{{y:.4f}}<extra></extra>'

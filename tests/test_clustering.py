@@ -12,7 +12,10 @@ src_path = Path(__file__).parent.parent / 'src'
 sys.path.insert(0, str(src_path))
 
 from clustering.traditional import KMeansClustering, HierarchicalClustering, KMedoidsClustering
-from clustering.advanced import GMMClustering, SpectralClusteringWrapper
+from clustering.advanced import (
+    GMMClustering, SpectralClusteringWrapper,
+    DECClustering, IDECClustering, DCNClustering
+)
 from clustering.validation import (
     compute_internal_metrics, compute_external_metrics,
     compare_clustering_methods, profile_clusters
@@ -303,6 +306,61 @@ class TestEdgeCases:
         labels = model.fit_predict(X)
         
         assert len(labels) == 100
+        assert len(np.unique(labels)) <= 3
+
+
+class TestDeepClustering:
+    """Test suite for deep clustering algorithms"""
+    
+    def test_dec_initialization(self):
+        """Test DEC initialization"""
+        model = DECClustering(n_clusters=3)
+        assert model.n_clusters == 3
+        assert model.batch_size == 256
+    
+    def test_dec_fit_predict(self, sample_data):
+        """Test DEC fit_predict method"""
+        X, _ = sample_data
+        X = X.astype(np.float32)
+        
+        model = DECClustering(n_clusters=3, pretrain_epochs=5, clustering_epochs=5)
+        labels = model.fit_predict(X)
+        
+        assert len(labels) == len(X)
+        assert len(np.unique(labels)) <= 3
+    
+    def test_idec_initialization(self):
+        """Test IDEC initialization"""
+        model = IDECClustering(n_clusters=3)
+        assert model.n_clusters == 3
+        assert model.batch_size == 256
+    
+    def test_idec_fit_predict(self, sample_data):
+        """Test IDEC fit_predict method"""
+        X, _ = sample_data
+        X = X.astype(np.float32)
+        
+        model = IDECClustering(n_clusters=3, pretrain_epochs=5, clustering_epochs=5)
+        labels = model.fit_predict(X)
+        
+        assert len(labels) == len(X)
+        assert len(np.unique(labels)) <= 3
+    
+    def test_dcn_initialization(self):
+        """Test DCN initialization"""
+        model = DCNClustering(n_clusters=3)
+        assert model.n_clusters == 3
+        assert model.batch_size == 256
+    
+    def test_dcn_fit_predict(self, sample_data):
+        """Test DCN fit_predict method"""
+        X, _ = sample_data
+        X = X.astype(np.float32)
+        
+        model = DCNClustering(n_clusters=3, pretrain_epochs=5, clustering_epochs=5)
+        labels = model.fit_predict(X)
+        
+        assert len(labels) == len(X)
         assert len(np.unique(labels)) <= 3
 
 

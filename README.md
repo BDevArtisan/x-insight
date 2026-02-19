@@ -17,18 +17,18 @@ x-insight/
 │   ├── 01_EDA_SSc_Data.ipynb       # Exploratory data analysis
 │   └── 02_Clustering_Traditional.ipynb  # Clustering experiments
 ├── src/                            # Source code
-│   ├── app.py                      # Streamlit web interface
+│   ├── app.py                      # Streamlit web interface (7 tabs)
 │   ├── data/
 │   │   └── preprocessing.py        # Data preprocessing pipeline
 │   ├── clustering/
 │   │   ├── traditional.py          # K-Means, Hierarchical, K-Medoids
-│   │   ├── advanced.py             # HDBSCAN, GMM, Spectral
+│   │   ├── advanced.py             # GMM, Spectral, DEC, IDEC, DCN, HDBSCAN, GMM-Auto
 │   │   └── validation.py           # Clustering metrics and evaluation
 │   ├── explainability/
 │   │   ├── global_explainability.py  # Feature importance, cluster profiling
 │   │   └── local_explainability.py   # Patient-level explanations (SHAP, LIME)
 │   ├── counterfactuals/
-│   │   └── counterfactual_explanations.py  # What-if scenarios, DiCE
+│   │   └── counterfactual_explanations.py  # What-if scenarios
 │   └── visualization/
 │       ├── dimensionality_reduction.py  # PCA, t-SNE, UMAP
 │       └── plots.py                # Visualization functions
@@ -49,15 +49,37 @@ x-insight/
 - Preprocessing pipeline persistence
 
 ### Clustering Algorithms
-- Traditional methods: K-Means, Hierarchical (Ward/Complete/Average), K-Medoids
-- Advanced methods: Gaussian Mixture Models, Spectral Clustering, HDBSCAN (optional)
-- Automatic optimal cluster number determination
+
+The platform separates clustering methods into two categories:
+
+#### Manual-k Methods *(user selects number of clusters)*
+These methods require specifying `k`. An **elbow curve** is provided as guidance for K-Means, Hierarchical, and K-Medoids.
+
+| Method | Description |
+|---|---|
+| **K-Means** | Partitions data into k clusters by minimizing within-cluster variance |
+| **Hierarchical** | Builds a dendrogram tree; useful for understanding data hierarchy |
+| **K-Medoids** | Like K-Means but uses real data points as centers — robust to outliers |
+| **GMM** | Probabilistic model fitting k Gaussian distributions (soft membership) |
+| **Spectral** | Graph-based method effective for non-convex cluster shapes |
+| **DEC** | Deep Embedded Clustering using autoencoders (ClustPy/PyTorch) |
+| **IDEC** | Improved DEC with better local structure preservation |
+| **DCN** | Deep Clustering Network with joint reconstruction and clustering |
+
+#### Auto-k Methods *(number of clusters determined automatically)*
+These methods require **no k selection** — the algorithm finds the structure on its own.
+
+| Method | Description |
+|---|---|
+| **HDBSCAN** | Density-based; finds clusters of varying density, marks noise patients as outliers |
+| **GMM (Auto-BIC)** | Tests k = 2..10 and selects the optimal k by minimizing the Bayesian Information Criterion |
 
 ### Validation Metrics
 - Internal metrics: Silhouette Score, Davies-Bouldin Index, Calinski-Harabasz Score
 - External metrics: Adjusted Rand Index, Normalized Mutual Information
 - Per-cluster silhouette analysis
 - Cluster profiling and comparison
+- Noise/outlier patient detection (HDBSCAN)
 
 ### Visualization
 - Dimensionality reduction: PCA, t-SNE, UMAP
@@ -89,14 +111,17 @@ x-insight/
 - What-if scenario analysis for cluster transitions
 - Multiple diverse alternatives for actionable insights
 
-### Web Interface
-- Streamlit-based interactive application
-- Five main sections: Data, Preprocessing, Clustering, Visualization, Explainability
-- Data upload and exploration
-- Real-time clustering and visualization
-- Global and local explainability analysis
-- Patient-level explanations and counterfactual scenarios
-- Downloadable results
+### Web Interface (7 Tabs)
+
+| Tab | Description |
+|---|---|
+| **1 — Data** | Upload and explore the dataset |
+| **2 — Preprocessing** | Configure and apply the preprocessing pipeline |
+| **3 — Clustering** | Select algorithm, configure parameters, run clustering |
+| **4 — Visualization** | PCA/t-SNE/UMAP cluster plots, radar charts, silhouette analysis |
+| **5 — Global Explainability** | Feature importance, cluster profiles, contrastive heatmaps |
+| **6 — Local Explainability** | Patient-level SHAP, LIME, distance, and probabilistic explanations |
+| **7 — Counterfactuals** | What-if scenarios and cluster transition recommendations |
 
 ## Installation
 
@@ -123,11 +148,12 @@ source .venv/bin/activate  # Linux/Mac
 pip install -r requirements.txt
 ```
 
-Note: Some packages (HDBSCAN, UMAP) may require Microsoft C++ Build Tools on Windows. These are optional and the platform provides graceful fallbacks.
+> **Windows users:** ClustPy (required for DEC/IDEC/DCN) requires Microsoft Visual C++ 14.0 or greater.
+> Install [Visual Studio Build Tools](https://visualstudio.microsoft.com/visual-cpp-build-tools/) and select "Desktop development with C++" before running `pip install`.
 
 ## Usage
 
-### Running the Streamlit Application
+### Running the Application
 
 ```bash
 streamlit run src/app.py
@@ -135,46 +161,42 @@ streamlit run src/app.py
 
 The application will be available at `http://localhost:8501`
 
-
 ### Running Tests
 
 ```bash
 pytest tests/ -v
 ```
 
-All 72 tests currently pass:
-- 11 preprocessing tests
-- 22 clustering tests
-- 10 global explainability tests
-- 12 local explainability tests
-- 17 counterfactual explanation tests
-
-### Implemented
-- Complete data preprocessing pipeline
-- Six clustering algorithms (K-Means, Hierarchical, K-Medoids, GMM, Spectral, HDBSCAN)
-- Comprehensive validation metrics
-- Multiple dimensionality reduction methods (PCA, t-SNE, UMAP)
-- Global explainability module with feature importance and decision rules
-- Local explainability with SHAP, LIME, and distance-based methods
-- Counterfactual explanations with clinical constraints (DiCE-style)
-- Interactive web interface with 5 tabs
-- Comprehensive test coverage (72 unit tests)
-
-### In Development
-- Integration of local explainability into Streamlit interface
-- Integration of counterfactual explanations into Streamlit interface
-- LLM integration for natural language explanations
-- Deep clustering methods
-- REST API
-
 ## Technical Stack
 
-- Core: Python 3.12, NumPy, Pandas
-- Machine Learning: scikit-learn, scipy
-- Explainability: SHAP, LIME, DiCE (counterfactuals), scikit-learn (surrogate models)
-- Visualization: Matplotlib, Seaborn, Plotly
-- Web Interface: Streamlit
-- Testing: pytest
+| Layer | Technologies |
+|---|---|
+| **Core** | Python 3.10+, NumPy, Pandas |
+| **Machine Learning** | scikit-learn, scipy |
+| **Deep Clustering** | ClustPy (DEC, IDEC, DCN) with PyTorch backend |
+| **Density Clustering** | hdbscan |
+| **Explainability** | SHAP, LIME, DiCE, scikit-learn (surrogate models) |
+| **Visualization** | Matplotlib, Seaborn, Plotly |
+| **Web Interface** | Streamlit |
+| **Testing** | pytest |
+
+## Current Status
+
+### Implemented
+- ✅ Complete data preprocessing pipeline (KNN imputation, encoding, scaling)
+- ✅ **11 clustering algorithms** — 9 manual-k + 2 true auto-k (HDBSCAN, GMM-Auto)
+- ✅ Elbow curve guidance for manual-k methods
+- ✅ Deep clustering methods via ClustPy (DEC, IDEC, DCN)
+- ✅ Comprehensive validation metrics with noise-aware evaluation
+- ✅ Multiple dimensionality reduction methods (PCA, t-SNE, UMAP)
+- ✅ Global explainability (feature importance, cluster profiling, contrastive analysis)
+- ✅ Local explainability (SHAP, LIME, distance-based, probabilistic)
+- ✅ Counterfactual explanations with clinical constraints
+- ✅ Interactive web interface with 7 tabs
+- ✅ Robust index-safe visualization (no IndexError on any cluster count)
+
+### In Development
+- 🔄 LLM integration for natural language explanations
 
 ## Contact
 

@@ -25,91 +25,107 @@ except ImportError:
 def explain_patient_shap(X, labels, patient_idx, feature_names=None, random_state=42):
     if not SHAP_AVAILABLE:
         raise ImportError("SHAP is required for this function. Install with: pip install shap")
-    
+
     X_arr = X.values if isinstance(X, pd.DataFrame) else X
-    
+
     if feature_names is None:
         if isinstance(X, pd.DataFrame):
             feature_names = X.columns.tolist()
         else:
             feature_names = [f"Feature_{i}" for i in range(X_arr.shape[1])]
-    
+
+    # Train surrogate on all data except the patient being explained to avoid data leakage
+    mask = np.ones(len(X_arr), dtype=bool)
+    mask[patient_idx] = False
+    X_train = X_arr[mask]
+    y_train = labels[mask]
+
     tree = DecisionTreeClassifier(max_depth=5, random_state=random_state)
-    tree.fit(X_arr, labels)
-    
+    tree.fit(X_train, y_train)
+
     explainer = shap.TreeExplainer(tree)
-    shap_values = explainer.shap_values(X_arr)
-    
+    patient_shap_values = explainer.shap_values(X_arr[patient_idx:patient_idx + 1])
+
     patient_cluster = labels[patient_idx]
-    
-    if isinstance(shap_values, list):
-        patient_shap = shap_values[patient_cluster][patient_idx]
+
+    if isinstance(patient_shap_values, list):
+        patient_shap = patient_shap_values[patient_cluster][0]
     else:
-        patient_shap = shap_values[patient_idx]
-    
-    explanation = {
+        patient_shap = patient_shap_values[0]
+
+    base_value = explainer.expected_value
+    if isinstance(base_value, np.ndarray):
+        base_value = base_value[patient_cluster]
+
+    return {
         'patient_idx': patient_idx,
         'cluster': patient_cluster,
         'feature_names': feature_names,
         'shap_values': patient_shap,
         'feature_values': X_arr[patient_idx],
-        'base_value': explainer.expected_value if not isinstance(explainer.expected_value, np.ndarray) else explainer.expected_value[patient_cluster]
+        'base_value': base_value,
     }
-    
-    return explanation
 
 
 def explain_patient_lime(X, labels, patient_idx, feature_names=None, random_state=42):
     if not LIME_AVAILABLE:
         raise ImportError("LIME is required for this function. Install with: pip install lime")
-    
+
     X_arr = X.values if isinstance(X, pd.DataFrame) else X
-    
+
     if feature_names is None:
         if isinstance(X, pd.DataFrame):
             feature_names = X.columns.tolist()
         else:
             feature_names = [f"Feature_{i}" for i in range(X_arr.shape[1])]
-    
+
+    # Train surrogate on all data except the patient being explained to avoid data leakage
+    mask = np.ones(len(X_arr), dtype=bool)
+    mask[patient_idx] = False
+    X_train = X_arr[mask]
+    y_train = labels[mask]
+
     tree = DecisionTreeClassifier(max_depth=5, random_state=random_state)
-    tree.fit(X_arr, labels)
-    
+    tree.fit(X_train, y_train)
+
     explainer = lime_tabular.LimeTabularExplainer(
-        X_arr,
+        X_train,
         feature_names=feature_names,
         class_names=[f"Cluster_{i}" for i in np.unique(labels)],
         mode='classification',
         random_state=random_state
     )
-    
+
     exp = explainer.explain_instance(
         X_arr[patient_idx],
         tree.predict_proba,
         num_features=len(feature_names)
     )
-    
+
     patient_cluster = labels[patient_idx]
-    lime_values = dict(exp.as_list())
-    
+
+    # Build a lookup from LIME output: LIME returns rules like "feature_name op value"
+    # We extract contributions by matching the feature name at the start of the rule string
+    lime_raw = dict(exp.as_list())
     feature_contributions = []
     for fname in feature_names:
-        contrib = 0
-        for key, val in lime_values.items():
-            if fname in key:
+        contrib = 0.0
+        for rule, val in lime_raw.items():
+            # LIME rule format: "FeatureName <= 1.23" or "0.50 < FeatureName <= 1.23"
+            parts = rule.split()
+            if fname in parts:
                 contrib = val
                 break
         feature_contributions.append(contrib)
-    
-    explanation = {
+
+    return {
         'patient_idx': patient_idx,
         'cluster': patient_cluster,
         'feature_names': feature_names,
         'lime_values': np.array(feature_contributions),
         'feature_values': X_arr[patient_idx],
-        'probability': tree.predict_proba(X_arr[patient_idx:patient_idx+1])[0]
+        'probability': tree.predict_proba(X_arr[patient_idx:patient_idx + 1])[0],
     }
-    
-    return explanation
 
 
 def explain_distance_to_centroid(X, labels, patient_idx, clustering_model, feature_names=None):
