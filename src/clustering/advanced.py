@@ -7,106 +7,132 @@ HDBSCAN (auto-k, density-based), and GMM with automatic BIC-based k selection.
 import numpy as np
 from sklearn.mixture import GaussianMixture
 from sklearn.cluster import SpectralClustering
-from clustpy.deep import DEC, IDEC, DCN
+
+# Try to import clustpy (optional dependency)
+try:
+    from clustpy.deep import DEC, IDEC, DCN
+    CLUSTPY_AVAILABLE = True
+except ImportError:
+    CLUSTPY_AVAILABLE = False
+    DEC = IDEC = DCN = None
 
 
-class DECClustering:
-    """Deep Embedded Clustering (DEC) wrapper."""
-    
-    def __init__(self, n_clusters=3, batch_size=256, pretrain_epochs=50, clustering_epochs=100, random_state=42):
-        self.n_clusters = n_clusters
-        self.batch_size = batch_size
-        self.pretrain_epochs = pretrain_epochs
-        self.clustering_epochs = clustering_epochs
-        self.random_state = random_state
-        self.model = None
-        self.labels_ = None
+
+if CLUSTPY_AVAILABLE:
+    class DECClustering:
+        """Deep Embedded Clustering (DEC) wrapper."""
         
-    def fit(self, X):
-        self.model = DEC(
-            n_clusters=self.n_clusters,
-            batch_size=self.batch_size,
-            pretrain_epochs=self.pretrain_epochs,
-            clustering_epochs=self.clustering_epochs,
-            random_state=self.random_state
-        )
-        self.labels_ = self.model.fit_predict(X)
-        return self
-    
-    def fit_predict(self, X):
-        self.fit(X)
-        return self.labels_
-    
-    def predict(self, X):
-        if self.model is None:
-            raise ValueError("Model not fitted yet")
-        return self.model.predict(X)
-
-
-class IDECClustering:
-    """Improved Deep Embedded Clustering (IDEC) wrapper."""
-    
-    def __init__(self, n_clusters=3, batch_size=256, pretrain_epochs=50, clustering_epochs=100, random_state=42):
-        self.n_clusters = n_clusters
-        self.batch_size = batch_size
-        self.pretrain_epochs = pretrain_epochs
-        self.clustering_epochs = clustering_epochs
-        self.random_state = random_state
-        self.model = None
-        self.labels_ = None
+        def __init__(self, n_clusters=3, batch_size=256, pretrain_epochs=50, clustering_epochs=100, random_state=42):
+            self.n_clusters = n_clusters
+            self.batch_size = batch_size
+            self.pretrain_epochs = pretrain_epochs
+            self.clustering_epochs = clustering_epochs
+            self.random_state = random_state
+            self.model = None
+            self.labels_ = None
+            
+        def fit(self, X):
+            self.model = DEC(
+                n_clusters=self.n_clusters,
+                batch_size=self.batch_size,
+                pretrain_epochs=self.pretrain_epochs,
+                clustering_epochs=self.clustering_epochs,
+                random_state=self.random_state
+            )
+            self.labels_ = self.model.fit_predict(X)
+            return self
         
-    def fit(self, X):
-        self.model = IDEC(
-            n_clusters=self.n_clusters,
-            batch_size=self.batch_size,
-            pretrain_epochs=self.pretrain_epochs,
-            clustering_epochs=self.clustering_epochs,
-            random_state=self.random_state
-        )
-        self.labels_ = self.model.fit_predict(X)
-        return self
-    
-    def fit_predict(self, X):
-        self.fit(X)
-        return self.labels_
-    
-    def predict(self, X):
-        if self.model is None:
-            raise ValueError("Model not fitted yet")
-        return self.model.predict(X)
-
-
-class DCNClustering:
-    """Deep Clustering Network (DCN) wrapper."""
-    
-    def __init__(self, n_clusters=3, batch_size=256, pretrain_epochs=50, clustering_epochs=100, random_state=42):
-        self.n_clusters = n_clusters
-        self.batch_size = batch_size
-        self.pretrain_epochs = pretrain_epochs
-        self.clustering_epochs = clustering_epochs
-        self.random_state = random_state
-        self.model = None
-        self.labels_ = None
+        def fit_predict(self, X):
+            self.fit(X)
+            return self.labels_
         
-    def fit(self, X):
-        self.model = DCN(
-            n_clusters=self.n_clusters,
-            batch_size=self.batch_size,
-            pretrain_epochs=self.pretrain_epochs,
-            clustering_epochs=self.clustering_epochs,
-            random_state=self.random_state
-        )
-        self.labels_ = self.model.fit_predict(X)
-        return self
-    
-    def fit_predict(self, X):
-        self.fit(X)
-        return self.labels_
-    
-    def predict(self, X):
-        if self.model is None:
-            raise ValueError("Model not fitted yet")
-        return self.model.predict(X)
+        def predict(self, X):
+            if self.model is None:
+                raise ValueError("Model not fitted yet")
+            return self.model.predict(X)
+else:
+    class DECClustering:
+        """Placeholder for DEC (clustpy not installed)."""
+        def __init__(self, *args, **kwargs):
+            raise ImportError("DECClustering requires clustpy. Install it with: pip install clustpy")
+
+
+if CLUSTPY_AVAILABLE:
+    class IDECClustering:
+        """Improved Deep Embedded Clustering (IDEC) wrapper."""
+        
+        def __init__(self, n_clusters=3, batch_size=256, pretrain_epochs=50, clustering_epochs=100, random_state=42):
+            self.n_clusters = n_clusters
+            self.batch_size = batch_size
+            self.pretrain_epochs = pretrain_epochs
+            self.clustering_epochs = clustering_epochs
+            self.random_state = random_state
+            self.model = None
+            self.labels_ = None
+            
+        def fit(self, X):
+            self.model = IDEC(
+                n_clusters=self.n_clusters,
+                batch_size=self.batch_size,
+                pretrain_epochs=self.pretrain_epochs,
+                clustering_epochs=self.clustering_epochs,
+                random_state=self.random_state
+            )
+            self.labels_ = self.model.fit_predict(X)
+            return self
+        
+        def fit_predict(self, X):
+            self.fit(X)
+            return self.labels_
+        
+        def predict(self, X):
+            if self.model is None:
+                raise ValueError("Model not fitted yet")
+            return self.model.predict(X)
+else:
+    class IDECClustering:
+        """Placeholder for IDEC (clustpy not installed)."""
+        def __init__(self, *args, **kwargs):
+            raise ImportError("IDECClustering requires clustpy. Install it with: pip install clustpy")
+
+
+if CLUSTPY_AVAILABLE:
+    class DCNClustering:
+        """Deep Clustering Network (DCN) wrapper."""
+        
+        def __init__(self, n_clusters=3, batch_size=256, pretrain_epochs=50, clustering_epochs=100, random_state=42):
+            self.n_clusters = n_clusters
+            self.batch_size = batch_size
+            self.pretrain_epochs = pretrain_epochs
+            self.clustering_epochs = clustering_epochs
+            self.random_state = random_state
+            self.model = None
+            self.labels_ = None
+            
+        def fit(self, X):
+            self.model = DCN(
+                n_clusters=self.n_clusters,
+                batch_size=self.batch_size,
+                pretrain_epochs=self.pretrain_epochs,
+                clustering_epochs=self.clustering_epochs,
+                random_state=self.random_state
+            )
+            self.labels_ = self.model.fit_predict(X)
+            return self
+        
+        def fit_predict(self, X):
+            self.fit(X)
+            return self.labels_
+        
+        def predict(self, X):
+            if self.model is None:
+                raise ValueError("Model not fitted yet")
+            return self.model.predict(X)
+else:
+    class DCNClustering:
+        """Placeholder for DCN (clustpy not installed)."""
+        def __init__(self, *args, **kwargs):
+            raise ImportError("DCNClustering requires clustpy. Install it with: pip install clustpy")
 
 
 class GMMClustering:
