@@ -7,6 +7,7 @@ import plotly.express as px
 from plotly.subplots import make_subplots
 from sklearn.tree import DecisionTreeClassifier, plot_tree
 from sklearn.inspection import permutation_importance
+from sklearn.metrics import accuracy_score
 import shap
 
 
@@ -15,19 +16,22 @@ def train_surrogate_tree(X, labels, feature_names=None, max_depth=5, random_stat
     
     tree = DecisionTreeClassifier(max_depth=max_depth, random_state=random_state)
     tree.fit(X_arr, labels)
-    
+
+    # Fidelity: how well the surrogate reproduces the clustering labels
+    fidelity = accuracy_score(labels, tree.predict(X_arr))
+
     if feature_names is None:
         if isinstance(X, pd.DataFrame):
             feature_names = X.columns.tolist()
         else:
             feature_names = [f'Feature_{i}' for i in range(X_arr.shape[1])]
-    
+
     importances = pd.DataFrame({
         'feature': feature_names,
         'importance': tree.feature_importances_
     }).sort_values('importance', ascending=False)
-    
-    return tree, importances
+
+    return tree, importances, fidelity
 
 
 def compute_permutation_importance(X, labels, feature_names=None, n_repeats=10, random_state=42):
@@ -95,7 +99,7 @@ def compute_feature_importance(X, labels, feature_names=None, method='all', **kw
     results = {}
     
     if method in ['surrogate', 'all']:
-        _, results['surrogate'] = train_surrogate_tree(X, labels, feature_names, **kwargs)
+        _, results['surrogate'], results['surrogate_fidelity'] = train_surrogate_tree(X, labels, feature_names, **kwargs)
     
     if method in ['permutation', 'all']:
         results['permutation'] = compute_permutation_importance(X, labels, feature_names, **kwargs)
@@ -519,6 +523,9 @@ def plot_feature_importance_comparison(importance_dict, top_n=10):
     """
     Create side-by-side comparison of all importance methods.
     """
+    # Filter out scalar metadata entries (e.g. surrogate_fidelity float)
+    importance_dict = {k: v for k, v in importance_dict.items() if hasattr(v, 'columns')}
+
     all_features = set()
     for imp_df in importance_dict.values():
         all_features.update(imp_df.head(top_n)['feature'].tolist())

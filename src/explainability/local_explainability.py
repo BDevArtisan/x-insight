@@ -7,6 +7,7 @@ import pandas as pd
 import matplotlib.pyplot as plt
 import plotly.graph_objects as go
 from sklearn.tree import DecisionTreeClassifier
+from sklearn.metrics import accuracy_score
 from scipy.spatial.distance import euclidean
 
 try:
@@ -43,6 +44,9 @@ def explain_patient_shap(X, labels, patient_idx, feature_names=None, random_stat
     tree = DecisionTreeClassifier(max_depth=5, random_state=random_state)
     tree.fit(X_train, y_train)
 
+    # Fidelity: how well the surrogate reproduces the clustering labels
+    fidelity = accuracy_score(y_train, tree.predict(X_train))
+
     explainer = shap.TreeExplainer(tree)
     patient_shap_values = explainer.shap_values(X_arr[patient_idx:patient_idx + 1])
 
@@ -64,6 +68,7 @@ def explain_patient_shap(X, labels, patient_idx, feature_names=None, random_stat
         'shap_values': patient_shap,
         'feature_values': X_arr[patient_idx],
         'base_value': base_value,
+        'fidelity': fidelity,
     }
 
 
@@ -87,6 +92,9 @@ def explain_patient_lime(X, labels, patient_idx, feature_names=None, random_stat
 
     tree = DecisionTreeClassifier(max_depth=5, random_state=random_state)
     tree.fit(X_train, y_train)
+
+    # Fidelity: how well the surrogate reproduces the clustering labels
+    fidelity = accuracy_score(y_train, tree.predict(X_train))
 
     explainer = lime_tabular.LimeTabularExplainer(
         X_train,
@@ -125,6 +133,7 @@ def explain_patient_lime(X, labels, patient_idx, feature_names=None, random_stat
         'lime_values': np.array(feature_contributions),
         'feature_values': X_arr[patient_idx],
         'probability': tree.predict_proba(X_arr[patient_idx:patient_idx + 1])[0],
+        'fidelity': fidelity,
     }
 
 

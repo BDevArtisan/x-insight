@@ -14,7 +14,8 @@ from pathlib import Path
 src_path = Path(__file__).parent
 sys.path.insert(0, str(src_path))
 
-from data.preprocessing import SScPreprocessor
+from data.preprocessing import NotSelectedPreprocessor, SelectedPreprocessor
+from sklearn.preprocessing import StandardScaler
 from clustering import (
     KMeansClustering, HierarchicalClustering, KMedoidsClustering,
     GMMClustering, SpectralClusteringWrapper,
@@ -93,21 +94,23 @@ st.markdown('<p class="sub-header">Explainable AI for Systemic Sclerosis Patient
 st.sidebar.title("Configuration")
 
 # File upload
-uploaded_file = st.sidebar.file_uploader("Upload SSc Data (CSV)", type=['csv'])
+uploaded_file = st.sidebar.file_uploader(
+    "📂 Upload SSc Data (Excel)",
+    type=['xlsx', 'xls'],
+    help="Uploadez votre fichier Excel (.xlsx ou .xls) contenant les données patients."
+)
 
 if uploaded_file is not None:
-    df = pd.read_csv(uploaded_file)
-    st.session_state.df = df
-    st.sidebar.success(f"Loaded {len(df)} patients")
+    try:
+        df = pd.read_excel(uploaded_file)
+        st.session_state.df = df
+        st.sidebar.success(f"✅ Fichier chargé : {len(df)} patients, {len(df.columns)} colonnes")
+    except Exception as e:
+        st.sidebar.error(f"❌ Erreur lors du chargement : {e}")
+        st.stop()
 else:
-    data_path = Path(__file__).parent.parent / 'data' / 'ssc_synthetic_data.csv'
-    if data_path.exists():
-        if 'df' not in st.session_state:
-            df = pd.read_csv(data_path)
-            st.session_state.df = df
-        st.sidebar.info(f"Using default data: {len(st.session_state.df)} patients")
-    else:
-        st.warning("Please upload a CSV file to begin")
+    if 'df' not in st.session_state:
+        st.info("👆 Veuillez uploader un fichier Excel dans la barre latérale pour commencer.")
         st.stop()
 
 df = st.session_state.df
@@ -159,44 +162,50 @@ with tab1:
 # TAB 2: Preprocessing
 with tab2:
     st.header("Data Preprocessing")
-    
-    # Feature selection
-    st.subheader("Feature Selection")
-    default_features = ['Age', 'Gender', 'mRSS', 'FVC_predicted', 'DLCO_predicted', 
-                       'ANA_titer', 'Anti_Scl_70', 'Anti_Centromere', 'CRP', 'ESR', 
-                       'Raynauds', 'Digital_Ulcers']
-    available_features = [col for col in default_features if col in df.columns]
-    
-    selected_features = st.multiselect(
-        "Select features for clustering",
-        available_features,
-        default=available_features
+
+    dataset_choice = st.radio(
+        "Dataset type",
+        ["not_selected", "selected"],
+        format_func=lambda x: "FHU-patient_descriptive_not_selected" if x == "not_selected" else "FHU-patients_selected",
+        horizontal=True,
     )
-    
+
+    n_neighbors = st.slider("KNN imputation — number of neighbors", 2, 15, 5)
+
     if st.button("Preprocess Data", type="primary"):
         with st.spinner("Preprocessing..."):
-            # Preprocess
-            preprocessor = SScPreprocessor()
-            X_scaled, df_imputed = preprocessor.fit_transform(df, selected_features)
-            
-            # Store in session state
+            if dataset_choice == "not_selected":
+                preprocessor = NotSelectedPreprocessor(n_neighbors=n_neighbors)
+            else:
+                preprocessor = SelectedPreprocessor(n_neighbors=n_neighbors)
+
+            X_scaled, df_processed, feature_names = preprocessor.fit_transform(df)
+
             st.session_state.X_scaled = X_scaled
-            st.session_state.df_imputed = df_imputed
+            st.session_state.df_imputed = df_processed
             st.session_state.preprocessor = preprocessor
-            st.session_state.selected_features = selected_features
-            
-            st.success("✅ Preprocessing complete!")
-            
-            # Show results
+            st.session_state.selected_features = feature_names
+
+            st.success(f"Preprocessing done — {X_scaled.shape[0]} patients, {X_scaled.shape[1]} features")
+
             col1, col2 = st.columns(2)
-            
             with col1:
-                st.subheader("Before Preprocessing")
-                st.dataframe(df[selected_features].head())
-            
+                st.subheader("Raw data (first 5 rows)")
+                st.dataframe(df.head())
             with col2:
-                st.subheader("After Preprocessing (Imputed)")
-                st.dataframe(df_imputed.head())
+                st.subheader("After preprocessing (first 5 rows)")
+                st.dataframe(df_processed.head())
+
+            st.subheader("Column classification")
+            col_info = []
+            for c in preprocessor.binary_cols:
+                col_info.append({"Column": c, "Type": "binary", "Encoding": "LabelEncoder (0/1)", "Scaling": "none"})
+            for c in preprocessor.ohe_cols:
+                col_info.append({"Column": c, "Type": "nominal", "Encoding": "OneHotEncoder (drop first)", "Scaling": "none"})
+            for c in preprocessor.continuous_cols:
+                scaler_type = type(preprocessor.scalers.get(c, StandardScaler())).__name__
+                col_info.append({"Column": c, "Type": "continuous", "Encoding": "none", "Scaling": scaler_type})
+            st.dataframe(pd.DataFrame(col_info), use_container_width=True)
 
 # TAB 3: Clustering
 with tab3:
@@ -424,6 +433,23 @@ with tab5:
             ["All Methods", "Surrogate Tree", "Permutation", "SHAP"]
         )
 
+        # --- Surrogate Tree concept explanation (always visible) ---
+        with st.expander("ℹ️ Qu'est-ce qu'un Surrogate Tree ?", expanded=False):
+            st.markdown("""
+**Concept du Surrogate Tree (Arbre de Substitution)**
+
+Le clustering est un algorithme **non supervisé** : il n'a pas de frontière de décision explicite
+qu'on puisse expliquer directement avec SHAP ou LIME. Pour contourner cela, on entraîne un
+**arbre de décision supervisé** à reproduire les labels de cluster — c'est le *surrogate* (substitut).
+
+Les importances de features, les valeurs SHAP et les règles de décision sont ensuite extraites
+**de cet arbre proxy**, pas du modèle de clustering lui-même.
+
+> ⚠️ **Implication** : si l'arbre proxy n'imite pas parfaitement le clustering, les explications
+> peuvent s'écarter de la réalité. C'est pourquoi la **fidélité (fidelity)** est mesurée et affichée.
+> Un score ≥ 80 % est considéré acceptable dans la littérature.
+            """)
+
         if st.button("Compute Feature Importance", type="primary"):
             with st.spinner("Computing feature importance..."):
                 method_map = {
@@ -441,6 +467,17 @@ with tab5:
 
                 st.session_state.importances = importances
 
+                # --- Surrogate fidelity badge ---
+                surrogate_fidelity = importances.get('surrogate_fidelity', None)
+                if surrogate_fidelity is not None:
+                    fidelity_pct = surrogate_fidelity * 100
+                    if surrogate_fidelity >= 0.80:
+                        st.success(f"✅ Fidélité du surrogate : **{fidelity_pct:.1f}%** — les explications sont fiables.")
+                    elif surrogate_fidelity >= 0.65:
+                        st.warning(f"⚠️ Fidélité du surrogate : **{fidelity_pct:.1f}%** — interprétez les résultats avec prudence.")
+                    else:
+                        st.error(f"❌ Fidélité du surrogate : **{fidelity_pct:.1f}%** — le proxy est peu représentatif du clustering réel.")
+
                 st.success("Feature importance computed")
 
                 if importance_method != "All Methods":
@@ -451,15 +488,17 @@ with tab5:
                     st.plotly_chart(fig_comp, use_container_width=True)
 
                     st.subheader("Individual Method Details")
-                    cols = st.columns(len(importances))
-                    for idx, (method_name, imp_df) in enumerate(importances.items()):
+                    imp_methods = {k: v for k, v in importances.items() if hasattr(v, 'columns')}
+                    cols = st.columns(len(imp_methods))
+                    for idx, (method_name, imp_df) in enumerate(imp_methods.items()):
                         with cols[idx]:
                             st.write(f"**{method_name.capitalize()}**")
                             fig = plot_feature_importance({method_name: imp_df}, top_n=8)
                             st.plotly_chart(fig, use_container_width=True)
 
                 st.subheader("Importance Scores")
-                for method_name, imp_df in importances.items():
+                imp_methods_all = {k: v for k, v in importances.items() if hasattr(v, 'columns')}
+                for method_name, imp_df in imp_methods_all.items():
                     with st.expander(f"{method_name.capitalize()} Importance"):
                         st.dataframe(imp_df)
 
@@ -507,12 +546,21 @@ with tab5:
 
         if st.button("Extract Decision Rules", type="primary"):
             with st.spinner("Training surrogate tree and extracting rules..."):
-                tree, _ = train_surrogate_tree(X_scaled, labels, feature_names, max_depth=4)
+                tree, _, fidelity_rules = train_surrogate_tree(X_scaled, labels, feature_names, max_depth=4)
 
                 class_names = [f'Cluster {i}' for i in range(len(np.unique(labels)))]
                 rules_df = extract_decision_rules(tree, feature_names, class_names)
 
                 st.success("Decision rules extracted")
+
+                # Fidelity badge for decision rules
+                fidelity_pct = fidelity_rules * 100
+                if fidelity_rules >= 0.80:
+                    st.success(f"✅ Fidélité du surrogate : **{fidelity_pct:.1f}%**")
+                elif fidelity_rules >= 0.65:
+                    st.warning(f"⚠️ Fidélité du surrogate : **{fidelity_pct:.1f}%** — interprétez les règles avec prudence.")
+                else:
+                    st.error(f"❌ Fidélité du surrogate : **{fidelity_pct:.1f}%** — les règles peuvent ne pas refléter le clustering réel.")
 
                 st.write(f"**Top {min(10, len(rules_df))} Decision Rules**")
                 st.dataframe(rules_df.head(10))
@@ -585,6 +633,44 @@ with tab6:
                 st.session_state.explained_patient_idx = patient_idx
 
                 st.success(f"Explanations generated for Patient {patient_idx}")
+
+                # --- Surrogate Tree concept explanation (local level) ---
+                with st.expander("ℹ️ Méthode : Surrogate Tree + SHAP/LIME", expanded=False):
+                    st.markdown("""
+**Comment fonctionne l'explication locale ?**
+
+Pour SHAP et LIME, un **arbre de décision** est entraîné à imiter le clustering
+(sauf pour le patient expliqué, pour éviter le data leakage). SHAP/LIME sont ensuite
+appliqués sur cet arbre proxy.
+
+Le score de **fidélité** mesure à quel point cet arbre reproduit les labels du clustering.
+Le seuil recommandé est **≥ 80%** pour considérer les explications comme fiables.
+
+> La **Distance au Centroïde** est la seule méthode directement appliquée au clustering, sans proxy.
+                    """)
+
+                # --- Fidelity badges ---
+                if 'shap' in explanations and 'error' not in explanations['shap']:
+                    fid = explanations['shap'].get('fidelity')
+                    if fid is not None:
+                        fid_pct = fid * 100
+                        if fid >= 0.80:
+                            st.success(f"✅ Fidélité surrogate (SHAP) : **{fid_pct:.1f}%** — explication fiable.")
+                        elif fid >= 0.65:
+                            st.warning(f"⚠️ Fidélité surrogate (SHAP) : **{fid_pct:.1f}%** — à interpréter avec prudence.")
+                        else:
+                            st.error(f"❌ Fidélité surrogate (SHAP) : **{fid_pct:.1f}%** — proxy peu représentatif.")
+
+                if 'lime' in explanations and 'error' not in explanations['lime']:
+                    fid = explanations['lime'].get('fidelity')
+                    if fid is not None:
+                        fid_pct = fid * 100
+                        if fid >= 0.80:
+                            st.success(f"✅ Fidélité surrogate (LIME) : **{fid_pct:.1f}%** — explication fiable.")
+                        elif fid >= 0.65:
+                            st.warning(f"⚠️ Fidélité surrogate (LIME) : **{fid_pct:.1f}%** — à interpréter avec prudence.")
+                        else:
+                            st.error(f"❌ Fidélité surrogate (LIME) : **{fid_pct:.1f}%** — proxy peu représentatif.")
 
                 st.subheader("Explanation Summary")
                 fig_summary = plot_patient_explanation_summary(explanations, top_n=8)
