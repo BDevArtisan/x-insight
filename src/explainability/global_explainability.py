@@ -135,10 +135,11 @@ def compute_contrastive_differences(df, labels, feature_cols):
 
 
 def plot_feature_importance(importance_dict, top_n=10, figsize=(12, 6)):
-    n_methods = len(importance_dict)
+    filtered_dict = {k: v for k, v in importance_dict.items() if isinstance(v, pd.DataFrame)}
+    n_methods = len(filtered_dict)
     
     if n_methods == 1:
-        method_name, importances = list(importance_dict.items())[0]
+        method_name, importances = list(filtered_dict.items())[0]
         top_features = importances.head(top_n)
         
         colors = px.colors.sequential.Viridis_r[:len(top_features)]
@@ -169,13 +170,13 @@ def plot_feature_importance(importance_dict, top_n=10, figsize=(12, 6)):
     else:
         fig = make_subplots(
             rows=1, cols=n_methods,
-            subplot_titles=[f'{name.capitalize()}' for name in importance_dict.keys()],
+            subplot_titles=[f'{name.capitalize()}' for name in filtered_dict.keys()],
             horizontal_spacing=0.12
         )
         
         colors_palette = [px.colors.sequential.Viridis_r, px.colors.sequential.Plasma_r, px.colors.sequential.Turbo_r]
         
-        for idx, (method_name, importances) in enumerate(importance_dict.items()):
+        for idx, (method_name, importances) in enumerate(filtered_dict.items()):
             top_features = importances.head(top_n)
             colors = colors_palette[idx % len(colors_palette)][:len(top_features)]
             

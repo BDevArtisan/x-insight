@@ -42,21 +42,23 @@ class TestSurrogateTree:
     def test_train_surrogate_tree(self, sample_clustered_data):
         X, labels, df, feature_names = sample_clustered_data
         
-        tree, importances = train_surrogate_tree(X, labels, feature_names)
+        tree, importances, fidelity = train_surrogate_tree(X, labels, feature_names)
         
         assert tree is not None
         assert len(importances) == len(feature_names)
         assert 'feature' in importances.columns
         assert 'importance' in importances.columns
         assert importances['importance'].sum() > 0
+        assert 0 <= fidelity <= 1
     
     def test_surrogate_tree_with_dataframe(self, sample_clustered_data):
         _, labels, df, _ = sample_clustered_data
         
-        tree, importances = train_surrogate_tree(df, labels)
+        tree, importances, fidelity = train_surrogate_tree(df, labels)
         
         assert len(importances) == len(df.columns)
         assert set(importances['feature']) == set(df.columns)
+        assert 0 <= fidelity <= 1
 
 
 class TestPermutationImportance:
@@ -110,7 +112,8 @@ class TestFeatureImportance:
         results = compute_feature_importance(X, labels, feature_names, method='surrogate')
         
         assert 'surrogate' in results
-        assert len(results) == 1
+        assert 'surrogate_fidelity' in results
+        assert len(results) == 2
 
 
 class TestClusterProfiling:
@@ -140,7 +143,7 @@ class TestDecisionRules:
     def test_extract_decision_rules(self, sample_clustered_data):
         X, labels, df, feature_names = sample_clustered_data
         
-        tree, _ = train_surrogate_tree(X, labels, feature_names, max_depth=3)
+        tree, _, _ = train_surrogate_tree(X, labels, feature_names, max_depth=3)
         rules_df = extract_decision_rules(tree, feature_names)
         
         assert len(rules_df) > 0

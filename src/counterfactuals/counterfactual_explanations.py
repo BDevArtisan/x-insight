@@ -142,6 +142,30 @@ def generate_counterfactual_optimization(
         distances = [euclidean(x_counterfactual, center) for center in centers]
         predicted_cluster = np.argmin(distances)
     
+    if predicted_cluster != target_cluster:
+        target_points = X_arr[labels == target_cluster]
+        if len(target_points) > 0:
+            distances_to_target = [euclidean(x_original, tp) for tp in target_points]
+            nearest_target_idx = np.argmin(distances_to_target)
+            nearest_target = target_points[nearest_target_idx]
+            
+            for alpha in [0.6, 0.7, 0.8, 0.9]:
+                x_candidate = x_original + alpha * (nearest_target - x_original)
+                
+                if constraints:
+                    x_candidate = constraints.apply_constraints(x_candidate)
+                
+                if hasattr(clustering_model, 'predict'):
+                    pred = clustering_model.predict(x_candidate.reshape(1, -1))[0]
+                else:
+                    dists = [euclidean(x_candidate, center) for center in centers]
+                    pred = np.argmin(dists)
+                
+                if pred == target_cluster:
+                    x_counterfactual = x_candidate
+                    predicted_cluster = pred
+                    break
+    
     changes = x_counterfactual - x_original
     feature_changes = np.where(np.abs(changes) > 1e-6)[0]
     
