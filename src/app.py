@@ -58,6 +58,18 @@ from counterfactuals import (
     plot_counterfactual_comparison,
     plot_diverse_counterfactuals
 )
+from llm import interpret_visualization
+from llm.prompts import (
+    VISUALIZATION_PROMPT,
+    GLOBAL_EXPLAINABILITY_PROMPT,
+    LOCAL_EXPLAINABILITY_PROMPT,
+    COUNTERFACTUAL_PROMPT
+)
+
+def extract_figure(plot_result):
+    if isinstance(plot_result, tuple):
+        return plot_result[0]
+    return plot_result
 
 # Page configuration
 st.set_page_config(
@@ -92,6 +104,13 @@ st.markdown('<p class="sub-header">Explainable AI for Systemic Sclerosis Patient
 
 # Sidebar
 st.sidebar.title("Configuration")
+
+st.sidebar.subheader("LLM Settings")
+api_key = st.sidebar.text_input(
+    "Google AI API Key",
+    type="password",
+    help="Entrez votre clé API Google AI Studio"
+)
 
 # File upload
 uploaded_file = st.sidebar.file_uploader(
@@ -413,6 +432,18 @@ with tab4:
                     profiles = profile_clusters(df_imputed, labels, st.session_state.selected_features)
                     fig_radar, _ = plot_radar_chart(profiles)
                     st.pyplot(fig_radar)
+        
+        if 'X_reduced' in st.session_state and api_key:
+            st.markdown("---")
+            if st.button("Interpréter avec LLM", key="llm_viz"):
+                with st.spinner("Analyse en cours..."):
+                    try:
+                        fig_viz = extract_figure(plot_silhouette_analysis(X_scaled, labels))
+                        interpretation = interpret_visualization(api_key, VISUALIZATION_PROMPT, fig_viz)
+                        st.subheader("Interprétation LLM")
+                        st.write(interpretation)
+                    except Exception as e:
+                        st.error(f"Erreur: {str(e)}")
 
 # TAB 5: Global Explainability
 with tab5:
@@ -571,6 +602,22 @@ Les importances de features, les valeurs SHAP et les règles de décision sont e
                 plot_tree(tree, feature_names=feature_names, class_names=class_names,
                          filled=True, rounded=True, ax=ax, fontsize=10)
                 st.pyplot(fig)
+        
+        if api_key and ('profiles' in st.session_state or 'importances' in st.session_state):
+            st.markdown("---")
+            if st.button("Interpréter avec LLM", key="llm_global"):
+                with st.spinner("Analyse en cours..."):
+                    try:
+                        fig_to_send = None
+                        if 'profiles' in st.session_state:
+                            fig_to_send = extract_figure(plot_contrastive_heatmap(st.session_state.differences))
+                        elif 'importances' in st.session_state:
+                            fig_to_send = extract_figure(plot_feature_importance(st.session_state.importances, top_n=10))
+                        interpretation = interpret_visualization(api_key, GLOBAL_EXPLAINABILITY_PROMPT, fig_to_send)
+                        st.subheader("Interprétation LLM")
+                        st.write(interpretation)
+                    except Exception as e:
+                        st.error(f"Erreur: {str(e)}")
 
 # TAB 6: Local Explainability
 with tab6:
@@ -856,6 +903,18 @@ Le seuil recommandé est **≥ 80%** pour considérer les explications comme fia
                             'Distance': explanations['probabilistic']['distances_to_centers']
                         })
                         st.dataframe(prob_data)
+        
+        if api_key and 'patient_explanations' in st.session_state:
+            st.markdown("---")
+            if st.button("Interpréter avec LLM", key="llm_local"):
+                with st.spinner("Analyse en cours..."):
+                    try:
+                        fig_to_send = extract_figure(plot_patient_explanation_summary(st.session_state.patient_explanations, top_n=8))
+                        interpretation = interpret_visualization(api_key, LOCAL_EXPLAINABILITY_PROMPT, fig_to_send)
+                        st.subheader("Interprétation LLM")
+                        st.write(interpretation)
+                    except Exception as e:
+                        st.error(f"Erreur: {str(e)}")
 
 # TAB 7: Counterfactual Explanations
 with tab7:
@@ -1084,6 +1143,22 @@ with tab7:
                         st.plotly_chart(fig_diverse, use_container_width=True)
                 else:
                     st.error("❌ Could not generate valid counterfactuals. Try relaxing constraints or changing target cluster.")
+        
+        if api_key and 'counterfactuals' in st.session_state:
+            st.markdown("---")
+            if st.button("Interpréter avec LLM", key="llm_cf"):
+                with st.spinner("Analyse en cours..."):
+                    try:
+                        cf_list = st.session_state.counterfactuals
+                        if cf_list and len(cf_list) > 0:
+                            fig_to_send = extract_figure(plot_counterfactual_comparison(cf_list[0], feature_names))
+                            interpretation = interpret_visualization(api_key, COUNTERFACTUAL_PROMPT, fig_to_send)
+                            st.subheader("Interprétation LLM")
+                            st.write(interpretation)
+                        else:
+                            st.warning("Aucun contrefactuel à analyser")
+                    except Exception as e:
+                        st.error(f"Erreur: {str(e)}")
 
 # Footer
 st.markdown("---")
