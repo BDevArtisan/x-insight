@@ -33,6 +33,7 @@ torchvision>=0.15.0
 # Web interface
 streamlit>=1.25.0
 dash>=2.11.0
+ydata-profiling>=4.6.0
 
 # LLM integration
 openai>=1.0.0

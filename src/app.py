@@ -9,6 +9,7 @@ import numpy as np
 import matplotlib.pyplot as plt
 import sys
 from pathlib import Path
+from ydata_profiling import ProfileReport
 
 # Add src to path
 src_path = Path(__file__).parent
@@ -163,6 +164,25 @@ with tab1:
         st.dataframe(missing_df)
     else:
         st.success("No missing values")
+    
+    st.subheader("Data Profiling Report")
+    if st.button("Generate Profiling Report", type="primary"):
+        with st.spinner("Generating profiling report..."):
+            profile = ProfileReport(
+                df,
+                minimal=False,
+                explorative=True,
+                html={"minify_html": False}
+            )
+            
+            html_report = profile.to_html()
+            
+            st.download_button(
+                label="Download Profiling Report",
+                data=html_report,
+                file_name="profiling_report.html",
+                mime="text/html"
+            )
 
 # TAB 2: Preprocessing
 with tab2:
@@ -1446,25 +1466,29 @@ with tab7:
         
         if st.button("Generate Counterfactuals", type="primary"):
             with st.spinner(f"Generating {n_counterfactuals} counterfactual(s)..."):
-                if cf_method == "DiCE-Style (Fast)":
-                    counterfactuals = generate_counterfactual_dice_style(
-                        X_scaled, labels, patient_idx, model,
-                        target_cluster=target_cluster,
-                        constraints=constraints if use_constraints else None,
-                        n_counterfactuals=n_counterfactuals
-                    )
-                else:
-                    from counterfactuals import generate_diverse_counterfactuals
-                    counterfactuals = generate_diverse_counterfactuals(
-                        X_scaled, labels, patient_idx, model,
-                        target_cluster=target_cluster,
-                        constraints=constraints if use_constraints else None,
-                        n_counterfactuals=n_counterfactuals
-                    )
+                try:
+                    if cf_method == "DiCE-Style (Fast)":
+                        counterfactuals = generate_counterfactual_dice_style(
+                            X_scaled, labels, patient_idx, model,
+                            target_cluster=target_cluster,
+                            constraints=constraints if use_constraints else None,
+                            n_counterfactuals=n_counterfactuals
+                        )
+                    else:
+                        from counterfactuals import generate_diverse_counterfactuals
+                        counterfactuals = generate_diverse_counterfactuals(
+                            X_scaled, labels, patient_idx, model,
+                            target_cluster=target_cluster,
+                            constraints=constraints if use_constraints else None,
+                            n_counterfactuals=n_counterfactuals
+                        )
+                except Exception as e:
+                    st.error(f"Error generating counterfactuals: {str(e)}")
+                    counterfactuals = []
                 
                 st.session_state.counterfactuals = counterfactuals
                 
-                if counterfactuals:
+                if counterfactuals and len(counterfactuals) > 0:
                     st.success(f"✅ Generated {len(counterfactuals)} valid counterfactual(s)")
                     
                     st.subheader("Quality Metrics")
@@ -1589,7 +1613,18 @@ with tab7:
                         fig_diverse = plot_diverse_counterfactuals(counterfactuals, feature_names, top_n=8)
                         st.plotly_chart(fig_diverse, use_container_width=True)
                 else:
-                    st.error("❌ Could not generate valid counterfactuals. Try relaxing constraints or changing target cluster.")
+                    st.warning("⚠️ Could not generate valid counterfactuals")
+                    st.info("""
+**Possible reasons:**
+- Target cluster may be too different from current cluster
+- Constraints may be too restrictive
+- Not enough data points in target cluster
+
+**Suggestions:**
+- Try a different target cluster
+- Relax or remove some constraints
+- Use DiCE-Style method if using Optimization-Based (or vice versa)
+                    """)
 
 # Footer
 st.markdown("---")
