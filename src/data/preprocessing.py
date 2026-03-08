@@ -26,8 +26,18 @@ def _test_normality(series: pd.Series) -> bool:
 
 
 class BasePreprocessor:
-    def __init__(self, n_neighbors: int = 5):
+    def __init__(
+        self, 
+        n_neighbors: int = 5,
+        remove_duplicates: bool = True,
+        outlier_method: Optional[str] = None,
+        outlier_threshold: float = 3.0
+    ):
         self.n_neighbors = n_neighbors
+        self.remove_duplicates = remove_duplicates
+        self.outlier_method = outlier_method
+        self.outlier_threshold = outlier_threshold
+        
         self.imputer = KNNImputer(n_neighbors=n_neighbors)
 
         self.binary_cols: List[str] = []
@@ -41,6 +51,10 @@ class BasePreprocessor:
 
         self.feature_names_out: List[str] = []
         self.fitted: bool = False
+        
+        self.duplicates_removed: int = 0
+        self.outliers_detected: Dict[str, int] = {}
+        self.outlier_indices: np.ndarray = np.array([], dtype=int)
 
     def _classify_columns(self, df: pd.DataFrame) -> None:
         self.binary_cols = []
@@ -62,10 +76,81 @@ class BasePreprocessor:
             else:
                 self.continuous_cols.append(col)
 
-    def fit_transform(self, df: pd.DataFrame) -> tuple:
-        self._classify_columns(df)
+    def _remove_duplicates(self, df: pd.DataFrame) -> pd.DataFrame:
+        initial_count = len(df)
+        df_clean = df.drop_duplicates()
+        self.duplicates_removed = initial_count - len(df_clean)
+        return df_clean
 
+    def _detect_outliers_zscore(self, df: pd.DataFrame, cols: List[str]) -> Dict[str, np.ndarray]:
+        outliers = {}
+        for col in cols:
+            if col in df.columns:
+                mask = np.zeros(len(df), dtype=bool)
+                non_null_mask = df[col].notna()
+                if non_null_mask.sum() > 0:
+                    values = df.loc[non_null_mask, col]
+                    z_scores = np.abs(stats.zscore(values))
+                    outlier_mask = z_scores > self.outlier_threshold
+                    mask[non_null_mask] = outlier_mask
+                outliers[col] = mask
+        return outliers
+
+    def _detect_outliers_iqr(self, df: pd.DataFrame, cols: List[str]) -> Dict[str, np.ndarray]:
+        outliers = {}
+        for col in cols:
+            if col in df.columns:
+                mask = np.zeros(len(df), dtype=bool)
+                non_null_mask = df[col].notna()
+                if non_null_mask.sum() > 0:
+                    values = df.loc[non_null_mask, col]
+                    Q1 = values.quantile(0.25)
+                    Q3 = values.quantile(0.75)
+                    IQR = Q3 - Q1
+                    lower_bound = Q1 - self.outlier_threshold * IQR
+                    upper_bound = Q3 + self.outlier_threshold * IQR
+                    outlier_mask = (values < lower_bound) | (values > upper_bound)
+                    mask[non_null_mask] = outlier_mask
+                outliers[col] = mask
+        return outliers
+
+    def _detect_outliers(self, df: pd.DataFrame) -> tuple:
+        if self.outlier_method is None:
+            return {}, np.array([], dtype=int)
+        
+        numeric_cols = [c for c in df.columns if c in self.continuous_cols]
+        
+        if self.outlier_method == 'zscore':
+            outliers_dict = self._detect_outliers_zscore(df, numeric_cols)
+        elif self.outlier_method == 'iqr':
+            outliers_dict = self._detect_outliers_iqr(df, numeric_cols)
+        else:
+            return {}, np.array([], dtype=int)
+        
+        outliers_count = {}
+        combined_mask = np.zeros(len(df), dtype=bool)
+        
+        for col, mask in outliers_dict.items():
+            outliers_count[col] = int(mask.sum())
+            combined_mask |= mask
+        
+        outlier_indices = np.where(combined_mask)[0]
+        
+        return outliers_count, outlier_indices
+
+    def fit_transform(self, df: pd.DataFrame, remove_outlier_rows: bool = False) -> tuple:
+        if self.remove_duplicates:
+            df = self._remove_duplicates(df)
+        
+        self._classify_columns(df)
+        
         work = df.drop(columns=[c for c in ID_COLS if c in df.columns], errors="ignore").copy()
+        
+        self.outliers_detected, self.outlier_indices = self._detect_outliers(work)
+        
+        if remove_outlier_rows and len(self.outlier_indices) > 0:
+            work = work.drop(work.index[self.outlier_indices])
+            work = work.reset_index(drop=True)
 
         work = work[self.binary_cols + self.ohe_cols + self.continuous_cols]
 

@@ -218,6 +218,94 @@ def plot_elbow_curve(k_range, scores, metric_name='Inertia', figsize=(8, 5)):
     return fig, ax
 
 
+def plot_optimal_k_analysis(results, figsize=(14, 10)):
+    """
+    Plot comprehensive optimal k analysis with all individual metrics.
+    
+    Parameters:
+    -----------
+    results : dict
+        Results from determine_optimal_k with metric='multi'
+        Should contain 'k', 'scores', 'silhouette', 'davies_bouldin', 'calinski_harabasz'
+    figsize : tuple
+        Figure size
+        
+    Returns:
+    --------
+    fig : matplotlib figure
+    recommendations : dict
+        Dictionary with recommended k for each metric
+    """
+    fig, axes = plt.subplots(2, 2, figsize=figsize)
+    fig.suptitle('Optimal K Analysis - Individual Metrics', fontsize=16, fontweight='bold')
+    
+    k_range = results['k']
+    recommendations = {}
+    
+    # 1. Silhouette Score (higher is better)
+    ax = axes[0, 0]
+    sil_scores = results['silhouette']
+    ax.plot(k_range, sil_scores, 'o-', color='#2E86AB', linewidth=2, markersize=8)
+    optimal_k_sil = k_range[np.argmax(sil_scores)]
+    ax.axvline(optimal_k_sil, color='red', linestyle='--', linewidth=2, 
+               label=f'Optimal k={optimal_k_sil}')
+    ax.scatter([optimal_k_sil], [max(sil_scores)], color='red', s=150, zorder=5, marker='*')
+    ax.set_xlabel('Number of Clusters (k)', fontsize=11)
+    ax.set_ylabel('Silhouette Score', fontsize=11)
+    ax.set_title('Silhouette Coefficient (↑ Higher is Better)', fontsize=12, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    recommendations['silhouette'] = optimal_k_sil
+    
+    # 2. Davies-Bouldin Index (lower is better)
+    ax = axes[0, 1]
+    db_scores = results['davies_bouldin']
+    ax.plot(k_range, db_scores, 'o-', color='#A23B72', linewidth=2, markersize=8)
+    optimal_k_db = k_range[np.argmin(db_scores)]
+    ax.axvline(optimal_k_db, color='red', linestyle='--', linewidth=2, 
+               label=f'Optimal k={optimal_k_db}')
+    ax.scatter([optimal_k_db], [min(db_scores)], color='red', s=150, zorder=5, marker='*')
+    ax.set_xlabel('Number of Clusters (k)', fontsize=11)
+    ax.set_ylabel('Davies-Bouldin Index', fontsize=11)
+    ax.set_title('Davies-Bouldin Index (↓ Lower is Better)', fontsize=12, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    recommendations['davies_bouldin'] = optimal_k_db
+    
+    # 3. Calinski-Harabasz Index (higher is better)
+    ax = axes[1, 0]
+    ch_scores = results['calinski_harabasz']
+    ax.plot(k_range, ch_scores, 'o-', color='#F18F01', linewidth=2, markersize=8)
+    optimal_k_ch = k_range[np.argmax(ch_scores)]
+    ax.axvline(optimal_k_ch, color='red', linestyle='--', linewidth=2, 
+               label=f'Optimal k={optimal_k_ch}')
+    ax.scatter([optimal_k_ch], [max(ch_scores)], color='red', s=150, zorder=5, marker='*')
+    ax.set_xlabel('Number of Clusters (k)', fontsize=11)
+    ax.set_ylabel('Calinski-Harabasz Index', fontsize=11)
+    ax.set_title('Calinski-Harabasz Index (↑ Higher is Better)', fontsize=12, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    recommendations['calinski_harabasz'] = optimal_k_ch
+    
+    # 4. Combined Score (normalized weighted average)
+    ax = axes[1, 1]
+    combined_scores = results['scores']
+    ax.plot(k_range, combined_scores, 'o-', color='#06A77D', linewidth=2, markersize=8)
+    optimal_k_combined = k_range[np.argmax(combined_scores)]
+    ax.axvline(optimal_k_combined, color='red', linestyle='--', linewidth=2, 
+               label=f'Optimal k={optimal_k_combined}')
+    ax.scatter([optimal_k_combined], [max(combined_scores)], color='red', s=150, zorder=5, marker='*')
+    ax.set_xlabel('Number of Clusters (k)', fontsize=11)
+    ax.set_ylabel('Combined Score', fontsize=11)
+    ax.set_title('Combined Score (50% Silhouette + 25% DB + 25% CH)', fontsize=12, fontweight='bold')
+    ax.grid(True, alpha=0.3)
+    ax.legend()
+    recommendations['combined'] = optimal_k_combined
+    
+    plt.tight_layout()
+    return fig, recommendations
+
+
 def plot_cluster_comparison(comparison_df, metrics=['silhouette', 'davies_bouldin'], 
                            figsize=(12, 5)):
     """

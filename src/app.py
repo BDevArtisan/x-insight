@@ -14,8 +14,9 @@ from pathlib import Path
 src_path = Path(__file__).parent
 sys.path.insert(0, str(src_path))
 
-from data.preprocessing import NotSelectedPreprocessor, SelectedPreprocessor
+from data.preprocessing import BasePreprocessor
 from sklearn.preprocessing import StandardScaler
+from sklearn.impute import KNNImputer
 from clustering import (
     KMeansClustering, HierarchicalClustering, KMedoidsClustering,
     GMMClustering, SpectralClusteringWrapper,
@@ -28,7 +29,8 @@ from visualization import (
     DimensionalityReducer,
     plot_clusters_2d, plot_clusters_interactive,
     plot_dendrogram, plot_silhouette_analysis,
-    plot_elbow_curve, plot_cluster_comparison,
+    plot_elbow_curve, plot_optimal_k_analysis,
+    plot_cluster_comparison,
     plot_cluster_profiles, plot_radar_chart
 )
 from explainability import (
@@ -95,22 +97,25 @@ st.sidebar.title("Configuration")
 
 # File upload
 uploaded_file = st.sidebar.file_uploader(
-    "📂 Upload SSc Data (Excel)",
-    type=['xlsx', 'xls'],
-    help="Uploadez votre fichier Excel (.xlsx ou .xls) contenant les données patients."
+    "Upload SSc Data",
+    type=['xlsx', 'xls', 'csv'],
+    help="Uploadez votre fichier (.xlsx, .xls ou .csv) contenant les données patients."
 )
 
 if uploaded_file is not None:
     try:
-        df = pd.read_excel(uploaded_file)
+        if uploaded_file.name.endswith('.csv'):
+            df = pd.read_csv(uploaded_file)
+        else:
+            df = pd.read_excel(uploaded_file)
         st.session_state.df = df
-        st.sidebar.success(f"✅ Fichier chargé : {len(df)} patients, {len(df.columns)} colonnes")
+        st.sidebar.success(f"Fichier chargé : {len(df)} patients, {len(df.columns)} colonnes")
     except Exception as e:
-        st.sidebar.error(f"❌ Erreur lors du chargement : {e}")
+        st.sidebar.error(f"Erreur lors du chargement : {e}")
         st.stop()
 else:
     if 'df' not in st.session_state:
-        st.info("👆 Veuillez uploader un fichier Excel dans la barre latérale pour commencer.")
+        st.info("Veuillez uploader un fichier de données dans la barre latérale pour commencer.")
         st.stop()
 
 df = st.session_state.df
@@ -163,56 +168,201 @@ with tab1:
 with tab2:
     st.header("Data Preprocessing")
 
-    dataset_choice = st.radio(
-        "Dataset type",
-        ["not_selected", "selected"],
-        format_func=lambda x: "FHU-patient_descriptive_not_selected" if x == "not_selected" else "FHU-patients_selected",
-        horizontal=True,
-    )
+    use_preprocessing = st.checkbox("Enable preprocessing", value=True)
 
-    n_neighbors = st.slider("KNN imputation — number of neighbors", 2, 15, 5)
-
-    if st.button("Preprocess Data", type="primary"):
-        with st.spinner("Preprocessing..."):
-            if dataset_choice == "not_selected":
-                preprocessor = NotSelectedPreprocessor(n_neighbors=n_neighbors)
+    if use_preprocessing:
+        st.subheader("K Selection for KNN Imputation")
+        
+        if st.button("Find Optimal K", type="secondary"):
+            with st.spinner("Testing different K values..."):
+                numeric_cols = df.select_dtypes(include=[np.number]).columns
+                numeric_data = df[numeric_cols].copy()
+                
+                if numeric_data.isnull().sum().sum() == 0:
+                    st.warning("No missing values found. K optimization requires missing data.")
+                else:
+                    k_range = range(2, 16)
+                    mse_scores = []
+                    
+                    for k in k_range:
+                        imputer = KNNImputer(n_neighbors=k)
+                        
+                        mask = ~numeric_data.isnull()
+                        available_data = numeric_data[mask]
+                        
+                        if len(available_data) > 100:
+                            sample_indices = np.random.choice(len(available_data), 100, replace=False)
+                        else:
+                            sample_indices = range(len(available_data))
+                        
+                        errors = []
+                        for idx in sample_indices:
+                            row_idx, col_idx = np.unravel_index(np.where(mask.values.flatten())[0][idx], mask.shape)
+                            
+                            test_data = numeric_data.copy()
+                            true_value = test_data.iloc[row_idx, col_idx]
+                            test_data.iloc[row_idx, col_idx] = np.nan
+                            
+                            try:
+                                imputed = imputer.fit_transform(test_data)
+                                predicted_value = imputed[row_idx, col_idx]
+                                errors.append((true_value - predicted_value) ** 2)
+                            except:
+                                continue
+                        
+                        if errors:
+                            mse_scores.append(np.mean(errors))
+                        else:
+                            mse_scores.append(np.nan)
+                    
+                    valid_scores = [(k, score) for k, score in zip(k_range, mse_scores) if not np.isnan(score)]
+                    
+                    if valid_scores:
+                        optimal_k = min(valid_scores, key=lambda x: x[1])[0]
+                        
+                        fig, ax = plt.subplots(figsize=(10, 5))
+                        ax.plot(k_range, mse_scores, marker='o', color='steelblue', linewidth=2)
+                        ax.axvline(optimal_k, color='red', linestyle='--', linewidth=2, label=f'Optimal K={optimal_k}')
+                        ax.scatter([optimal_k], [mse_scores[optimal_k-2]], color='red', s=100, zorder=5)
+                        ax.set_xlabel('Number of Neighbors (K)', fontsize=12)
+                        ax.set_ylabel('Mean Squared Error', fontsize=12)
+                        ax.set_title('KNN Imputation - K Selection via Cross-Validation', fontsize=14)
+                        ax.grid(True, alpha=0.3)
+                        ax.legend()
+                        st.pyplot(fig)
+                        
+                        st.success(f"Suggested optimal K: {optimal_k}")
+                        st.info(f"MSE at K={optimal_k}: {mse_scores[optimal_k-2]:.4f}")
+                    else:
+                        st.error("Could not compute optimal K. Check your data.")
+        
+        st.subheader("Preprocessing Options")
+        
+        col1, col2 = st.columns(2)
+        
+        with col1:
+            remove_duplicates = st.checkbox("Remove duplicates", value=True)
+            n_neighbors = st.slider("KNN imputation — number of neighbors", 2, 15, 5)
+        
+        with col2:
+            outlier_method = st.selectbox(
+                "Outlier detection method",
+                ["None", "Z-Score", "IQR"],
+                index=0
+            )
+            if outlier_method != "None":
+                outlier_threshold = st.slider(
+                    "Outlier threshold",
+                    1.5, 5.0, 3.0, 0.5,
+                    help="Z-Score: typically 3.0 | IQR: typically 1.5"
+                )
+                remove_outlier_patients = st.checkbox(
+                    "Remove outlier patients", 
+                    value=False,
+                    help="Remove patients with outlier values from the analysis"
+                )
             else:
-                preprocessor = SelectedPreprocessor(n_neighbors=n_neighbors)
+                outlier_threshold = 3.0
+                remove_outlier_patients = False
 
-            X_scaled, df_processed, feature_names = preprocessor.fit_transform(df)
+    if st.button("Process Data", type="primary"):
+        with st.spinner("Processing..."):
+            if use_preprocessing:
+                outlier_method_map = {"None": None, "Z-Score": "zscore", "IQR": "iqr"}
+                
+                preprocessor = BasePreprocessor(
+                    n_neighbors=n_neighbors,
+                    remove_duplicates=remove_duplicates,
+                    outlier_method=outlier_method_map[outlier_method],
+                    outlier_threshold=outlier_threshold
+                )
 
-            st.session_state.X_scaled = X_scaled
-            st.session_state.df_imputed = df_processed
-            st.session_state.preprocessor = preprocessor
-            st.session_state.selected_features = feature_names
+                X_scaled, df_processed, feature_names = preprocessor.fit_transform(df, remove_outlier_rows=remove_outlier_patients)
 
-            st.success(f"Preprocessing done — {X_scaled.shape[0]} patients, {X_scaled.shape[1]} features")
+                st.session_state.X_scaled = X_scaled
+                st.session_state.df_imputed = df_processed
+                st.session_state.preprocessor = preprocessor
+                st.session_state.selected_features = feature_names
+                st.session_state.df_raw = df
 
-            col1, col2 = st.columns(2)
-            with col1:
-                st.subheader("Raw data (first 5 rows)")
-                st.dataframe(df.head())
-            with col2:
-                st.subheader("After preprocessing (first 5 rows)")
-                st.dataframe(df_processed.head())
+                st.success(f"Preprocessing done — {X_scaled.shape[0]} patients, {X_scaled.shape[1]} features")
+                
+                if preprocessor.duplicates_removed > 0:
+                    st.info(f"Duplicates removed: {preprocessor.duplicates_removed}")
+                
+                if len(preprocessor.outlier_indices) > 0:
+                    n_outlier_patients = len(preprocessor.outlier_indices)
+                    total_outlier_values = sum(preprocessor.outliers_detected.values())
+                    
+                    if remove_outlier_patients:
+                        st.info(f"Outliers removed: {n_outlier_patients} patient(s) with {total_outlier_values} outlier value(s)")
+                    else:
+                        st.warning(f"Outliers detected: {n_outlier_patients} patient(s) with {total_outlier_values} outlier value(s)")
+                    
+                    with st.expander("Outlier details"):
+                        col_a, col_b = st.columns(2)
+                        
+                        with col_a:
+                            st.write("**Outliers by feature:**")
+                            outlier_df = pd.DataFrame([
+                                {"Feature": k, "Outliers": v} 
+                                for k, v in preprocessor.outliers_detected.items() if v > 0
+                            ])
+                            st.dataframe(outlier_df, use_container_width=True)
+                        
+                        with col_b:
+                            st.write("**Patient IDs with outliers:**")
+                            patient_id_col = 'Patient_ID' if 'Patient_ID' in df.columns else None
+                            
+                            if patient_id_col:
+                                outlier_patient_ids = df.iloc[preprocessor.outlier_indices][patient_id_col].values
+                                outlier_list_df = pd.DataFrame({
+                                    "Patient_ID": outlier_patient_ids,
+                                    "Index": preprocessor.outlier_indices
+                                })
+                                st.dataframe(outlier_list_df, use_container_width=True)
+                            else:
+                                outlier_list_df = pd.DataFrame({
+                                    "Index": preprocessor.outlier_indices
+                                })
+                                st.dataframe(outlier_list_df, use_container_width=True)
 
-            st.subheader("Column classification")
-            col_info = []
-            for c in preprocessor.binary_cols:
-                col_info.append({"Column": c, "Type": "binary", "Encoding": "LabelEncoder (0/1)", "Scaling": "none"})
-            for c in preprocessor.ohe_cols:
-                col_info.append({"Column": c, "Type": "nominal", "Encoding": "OneHotEncoder (drop first)", "Scaling": "none"})
-            for c in preprocessor.continuous_cols:
-                scaler_type = type(preprocessor.scalers.get(c, StandardScaler())).__name__
-                col_info.append({"Column": c, "Type": "continuous", "Encoding": "none", "Scaling": scaler_type})
-            st.dataframe(pd.DataFrame(col_info), use_container_width=True)
+                col1, col2 = st.columns(2)
+                with col1:
+                    st.subheader("Raw data (first 5 rows)")
+                    st.dataframe(df.head())
+                with col2:
+                    st.subheader("After preprocessing (first 5 rows)")
+                    st.dataframe(df_processed.head())
+
+                st.subheader("Column classification")
+                col_info = []
+                for c in preprocessor.binary_cols:
+                    col_info.append({"Column": c, "Type": "binary", "Encoding": "LabelEncoder (0/1)", "Scaling": "none"})
+                for c in preprocessor.ohe_cols:
+                    col_info.append({"Column": c, "Type": "nominal", "Encoding": "OneHotEncoder (drop first)", "Scaling": "none"})
+                for c in preprocessor.continuous_cols:
+                    scaler_type = type(preprocessor.scalers.get(c, StandardScaler())).__name__
+                    col_info.append({"Column": c, "Type": "continuous", "Encoding": "none", "Scaling": scaler_type})
+                st.dataframe(pd.DataFrame(col_info), use_container_width=True)
+            else:
+                numeric_df = df.select_dtypes(include=[np.number])
+                numeric_df = numeric_df.fillna(0)
+                
+                st.session_state.X_scaled = numeric_df.values
+                st.session_state.df_imputed = numeric_df
+                st.session_state.preprocessor = None
+                st.session_state.selected_features = list(numeric_df.columns)
+
+                st.success(f"Data ready — {numeric_df.shape[0]} patients, {numeric_df.shape[1]} features")
+                st.dataframe(numeric_df.head())
 
 # TAB 3: Clustering
 with tab3:
     st.header("Clustering Analysis")
 
     if 'X_scaled' not in st.session_state:
-        st.warning("Please preprocess data first (Tab 2)")
+        st.warning("Please process data first (Tab 2)")
     else:
         X_scaled = st.session_state.X_scaled
         df_imputed = st.session_state.df_imputed
@@ -221,6 +371,7 @@ with tab3:
         ELBOW_METHODS  = ["K-Means", "Hierarchical", "K-Medoids"]   # elbow curve + slider
         MANUAL_K_METHODS = ELBOW_METHODS + ["GMM", "Spectral", "DEC", "IDEC", "DCN"]  # slider only
         AUTO_K_METHODS = ["HDBSCAN", "GMM (Auto-BIC)"]               # no slider
+        COMPARE_MODE = "🔬 Compare All Methods"
 
         col1, col2 = st.columns([1, 2])
 
@@ -228,21 +379,151 @@ with tab3:
             st.subheader("Method Selection")
             method = st.selectbox(
                 "Clustering Method",
-                MANUAL_K_METHODS + AUTO_K_METHODS
+                [COMPARE_MODE] + MANUAL_K_METHODS + AUTO_K_METHODS
             )
 
-            if method in MANUAL_K_METHODS:
+            if method == COMPARE_MODE:
+                st.info("Compare all clustering algorithms with the same k value.")
+                n_clusters = st.slider("Number of Clusters (k) for comparison", 2, 10, 3)
+                hdbscan_min_size = 5  # Default for HDBSCAN
+                
+                # Add Analyze Optimal K button for comparison mode
+                if st.button("Analyze Optimal K (K-Means)"):
+                    with st.spinner("Computing optimal k analysis..."):
+                        k_range = range(2, 11)
+                        results = determine_optimal_k(X_scaled, k_range=k_range, method='kmeans', metric='multi')
+                        
+                        # Display individual recommendations
+                        st.subheader("📊 Optimal K Recommendations by Metric")
+                        
+                        fig, recommendations = plot_optimal_k_analysis(results)
+                        st.pyplot(fig)
+                        
+                        # Display recommendations table
+                        col_a, col_b, col_c, col_d = st.columns(4)
+                        with col_a:
+                            st.metric(
+                                "🔵 Silhouette", 
+                                f"k = {recommendations['silhouette']}",
+                                help="Mesure la séparation entre clusters (↑ plus élevé = meilleur)"
+                            )
+                        with col_b:
+                            st.metric(
+                                "🟣 Davies-Bouldin", 
+                                f"k = {recommendations['davies_bouldin']}",
+                                help="Ratio de dispersion intra/inter clusters (↓ plus bas = meilleur)"
+                            )
+                        with col_c:
+                            st.metric(
+                                "🟠 Calinski-Harabasz", 
+                                f"k = {recommendations['calinski_harabasz']}",
+                                help="Ratio de variance inter/intra clusters (↑ plus élevé = meilleur)"
+                            )
+                        with col_d:
+                            st.metric(
+                                "🟢 Combined Score", 
+                                f"k = {recommendations['combined']}",
+                                help="Score pondéré combinant les 3 métriques"
+                            )
+                        
+                        # Voting summary
+                        votes = list(recommendations.values())
+                        most_common = max(set(votes), key=votes.count)
+                        vote_count = votes.count(most_common)
+                        
+                        if vote_count >= 3:
+                            st.success(f"✅ Consensus fort : k = {most_common} recommandé par {vote_count}/4 métriques")
+                        elif vote_count == 2:
+                            st.info(f"⚖️ Pas de consensus clair. k = {most_common} suggéré par 2 métriques. Considérez aussi : {set(votes) - {most_common}}")
+                        else:
+                            st.warning(f"⚠️ Désaccord entre métriques. Utilisez votre expertise du domaine ou le score combiné (k = {recommendations['combined']})")
+                        
+                        # Quality assessment
+                        quality = results.get('quality', 'unknown')
+                        quality_emojis = {
+                            'excellent': '🌟', 
+                            'good': '✅', 
+                            'moderate': '⚠️', 
+                            'weak': '❌'
+                        }
+                        quality_msgs = {
+                            'excellent': 'Excellente structure de clusters (Silhouette ≥ 0.7)',
+                            'good': 'Bonne structure de clusters (Silhouette ≥ 0.5)',
+                            'moderate': 'Structure de clusters modérée (Silhouette ≥ 0.25)',
+                            'weak': 'Structure de clusters faible (Silhouette < 0.25)'
+                        }
+                        if quality in quality_emojis:
+                            st.info(f"{quality_emojis[quality]} {quality_msgs[quality]}")
+            elif method in MANUAL_K_METHODS:
                 if method in ELBOW_METHODS:
-                    st.info("This method requires choosing the number of clusters. Use the elbow curve below as a guide.")
-                    if st.button("Show Elbow Curve"):
-                        with st.spinner("Computing elbow curve..."):
+                    st.info("This method requires choosing the number of clusters. Use the analysis below as a guide.")
+                    if st.button("Analyze Optimal K"):
+                        with st.spinner("Computing optimal k analysis..."):
                             method_map = {"K-Means": "kmeans", "Hierarchical": "hierarchical", "K-Medoids": "kmedoids"}
                             k_range = range(2, 11)
                             results = determine_optimal_k(X_scaled, k_range=k_range, method=method_map[method], metric='multi')
-                            recommended_k = results['k'][int(np.argmax(results['scores']))]
-                            st.info(f"Recommended k = {recommended_k} (highest combined score)")
-                            fig_elbow, _ = plot_elbow_curve(results['k'], results['scores'], metric_name='Combined Score')
-                            st.pyplot(fig_elbow)
+                            
+                            # Display individual recommendations
+                            st.subheader("📊 Optimal K Recommendations by Metric")
+                            
+                            fig, recommendations = plot_optimal_k_analysis(results)
+                            st.pyplot(fig)
+                            
+                            # Display recommendations table
+                            col_a, col_b, col_c, col_d = st.columns(4)
+                            with col_a:
+                                st.metric(
+                                    "🔵 Silhouette", 
+                                    f"k = {recommendations['silhouette']}",
+                                    help="Mesure la séparation entre clusters (↑ plus élevé = meilleur)"
+                                )
+                            with col_b:
+                                st.metric(
+                                    "🟣 Davies-Bouldin", 
+                                    f"k = {recommendations['davies_bouldin']}",
+                                    help="Ratio de dispersion intra/inter clusters (↓ plus bas = meilleur)"
+                                )
+                            with col_c:
+                                st.metric(
+                                    "🟠 Calinski-Harabasz", 
+                                    f"k = {recommendations['calinski_harabasz']}",
+                                    help="Ratio de variance inter/intra clusters (↑ plus élevé = meilleur)"
+                                )
+                            with col_d:
+                                st.metric(
+                                    "🟢 Combined Score", 
+                                    f"k = {recommendations['combined']}",
+                                    help="Score pondéré combinant les 3 métriques"
+                                )
+                            
+                            # Voting summary
+                            votes = list(recommendations.values())
+                            most_common = max(set(votes), key=votes.count)
+                            vote_count = votes.count(most_common)
+                            
+                            if vote_count >= 3:
+                                st.success(f"✅ Consensus fort : k = {most_common} recommandé par {vote_count}/4 métriques")
+                            elif vote_count == 2:
+                                st.info(f"⚖️ Pas de consensus clair. k = {most_common} suggéré par 2 métriques. Considérez aussi : {set(votes) - {most_common}}")
+                            else:
+                                st.warning(f"⚠️ Désaccord entre métriques. Utilisez votre expertise du domaine ou le score combiné (k = {recommendations['combined']})")
+                            
+                            # Quality assessment
+                            quality = results.get('quality', 'unknown')
+                            quality_emojis = {
+                                'excellent': '🌟', 
+                                'good': '✅', 
+                                'moderate': '⚠️', 
+                                'weak': '❌'
+                            }
+                            quality_msgs = {
+                                'excellent': 'Excellente structure de clusters (Silhouette ≥ 0.7)',
+                                'good': 'Bonne structure de clusters (Silhouette ≥ 0.5)',
+                                'moderate': 'Structure de clusters modérée (Silhouette ≥ 0.25)',
+                                'weak': 'Structure de clusters faible (Silhouette < 0.25)'
+                            }
+                            if quality in quality_emojis:
+                                st.info(f"{quality_emojis[quality]} {quality_msgs[quality]}")
                 else:
                     st.info("This method requires specifying the number of clusters (k).")
                 n_clusters = st.slider("Number of Clusters (k)", 2, 10, 3)
@@ -264,94 +545,319 @@ with tab3:
                     hdbscan_min_size = None
 
         with col2:
-            descriptions = {
-                "K-Means": "Partitions data into k clusters by minimizing within-cluster variance. Fast and simple. Use the elbow curve to choose k.",
-                "Hierarchical": "Builds a tree of clusters (dendrogram). Useful for understanding data hierarchy. Use the elbow curve to choose k.",
-                "K-Medoids": "Like K-Means but uses actual data points as cluster centers — more robust to outliers. Use the elbow curve to choose k.",
-                "GMM": "Probabilistic model that fits k Gaussian distributions to the data. Provides soft (probabilistic) cluster membership. k must be specified.",
-                "Spectral": "Graph-based method that clusters based on data connectivity. Effective for non-convex cluster shapes. k must be specified.",
-                "DEC": "Deep Embedded Clustering: trains an autoencoder to learn a compact representation, then clusters in latent space. k sets the number of latent clusters.",
-                "IDEC": "Improved DEC: adds a reconstruction loss to better preserve local data structure during clustering. k sets the number of latent clusters.",
-                "DCN": "Deep Clustering Network: jointly optimizes reconstruction and clustering objectives with structural constraints. k sets the number of latent clusters.",
-                "HDBSCAN": "🤖 AUTO-K — Density-based clustering that automatically finds the number of clusters. Robust to noise and outlier patients. No k needed.",
-                "GMM (Auto-BIC)": "🤖 AUTO-K — Gaussian Mixture Model that automatically selects the optimal number of clusters by minimizing the Bayesian Information Criterion (BIC). No k needed.",
-            }
-            st.subheader("Method Description")
-            st.info(descriptions[method])
+            if method == COMPARE_MODE:
+                st.subheader("Comparison Mode")
+                st.info("🔬 **Comparison Mode** will execute all clustering algorithms and display a comparative table with metrics.\n\n"
+                       "**Algorithms included:**\n"
+                       "- K-Means, Hierarchical, K-Medoids\n"
+                       "- GMM, Spectral\n"
+                       "- DEC, IDEC, DCN (Deep Learning)\n"
+                       "- HDBSCAN (auto-k), GMM Auto-BIC (auto-k)\n\n"
+                       "⏱️ This may take a few moments, especially for deep learning methods.")
+            else:
+                descriptions = {
+                    "K-Means": "Partitions data into k clusters by minimizing within-cluster variance. Fast and simple. Use the elbow curve to choose k.",
+                    "Hierarchical": "Builds a tree of clusters (dendrogram). Useful for understanding data hierarchy. Use the elbow curve to choose k.",
+                    "K-Medoids": "Like K-Means but uses actual data points as cluster centers — more robust to outliers. Use the elbow curve to choose k.",
+                    "GMM": "Probabilistic model that fits k Gaussian distributions to the data. Provides soft (probabilistic) cluster membership. k must be specified.",
+                    "Spectral": "Graph-based method that clusters based on data connectivity. Effective for non-convex cluster shapes. k must be specified.",
+                    "DEC": "Deep Embedded Clustering: trains an autoencoder to learn a compact representation, then clusters in latent space. k sets the number of latent clusters.",
+                    "IDEC": "Improved DEC: adds a reconstruction loss to better preserve local data structure during clustering. k sets the number of latent clusters.",
+                    "DCN": "Deep Clustering Network: jointly optimizes reconstruction and clustering objectives with structural constraints. k sets the number of latent clusters.",
+                    "HDBSCAN": "🤖 AUTO-K — Density-based clustering that automatically finds the number of clusters. Robust to noise and outlier patients. No k needed.",
+                    "GMM (Auto-BIC)": "🤖 AUTO-K — Gaussian Mixture Model that automatically selects the optimal number of clusters by minimizing the Bayesian Information Criterion (BIC). No k needed.",
+                }
+                st.subheader("Method Description")
+                st.info(descriptions[method])
 
-        if st.button("Run Clustering", type="primary"):
-            with st.spinner(f"Running {method}..."):
-                if method == "K-Means":
+        button_label = "Run Comparison" if method == COMPARE_MODE else "Run Clustering"
+        if st.button(button_label, type="primary"):
+            if method == COMPARE_MODE:
+                # Comparison mode - run all methods
+                with st.spinner("Running all clustering algorithms..."):
+                    methods_labels = {}
+                    methods_models = {}
+                    
+                    # Traditional methods with k
+                    progress_bar = st.progress(0)
+                    total_methods = 10
+                    current = 0
+                    
+                    st.write("Running K-Means...")
                     model = KMeansClustering(n_clusters=n_clusters)
-                elif method == "Hierarchical":
+                    methods_labels["K-Means"] = model.fit_predict(X_scaled)
+                    methods_models["K-Means"] = model
+                    current += 1
+                    progress_bar.progress(current / total_methods)
+                    
+                    st.write("Running Hierarchical...")
                     model = HierarchicalClustering(n_clusters=n_clusters)
-                elif method == "K-Medoids":
+                    methods_labels["Hierarchical"] = model.fit_predict(X_scaled)
+                    methods_models["Hierarchical"] = model
+                    current += 1
+                    progress_bar.progress(current / total_methods)
+                    
+                    st.write("Running K-Medoids...")
                     model = KMedoidsClustering(n_clusters=n_clusters)
-                elif method == "GMM":
+                    methods_labels["K-Medoids"] = model.fit_predict(X_scaled)
+                    methods_models["K-Medoids"] = model
+                    current += 1
+                    progress_bar.progress(current / total_methods)
+                    
+                    st.write("Running GMM...")
                     model = GMMClustering(n_components=n_clusters)
-                elif method == "Spectral":
+                    methods_labels["GMM"] = model.fit_predict(X_scaled)
+                    methods_models["GMM"] = model
+                    current += 1
+                    progress_bar.progress(current / total_methods)
+                    
+                    st.write("Running Spectral...")
                     model = SpectralClusteringWrapper(n_clusters=n_clusters)
-                elif method == "DEC":
-                    model = DECClustering(n_clusters=n_clusters, pretrain_epochs=10, clustering_epochs=20)
-                elif method == "IDEC":
-                    model = IDECClustering(n_clusters=n_clusters, pretrain_epochs=10, clustering_epochs=20)
-                elif method == "DCN":
-                    model = DCNClustering(n_clusters=n_clusters, pretrain_epochs=10, clustering_epochs=20)
-                elif method == "HDBSCAN":
+                    methods_labels["Spectral"] = model.fit_predict(X_scaled)
+                    methods_models["Spectral"] = model
+                    current += 1
+                    progress_bar.progress(current / total_methods)
+                    
+                    st.write("Running DEC (Deep Learning)...")
+                    try:
+                        model = DECClustering(n_clusters=n_clusters, pretrain_epochs=10, clustering_epochs=20)
+                        methods_labels["DEC"] = model.fit_predict(X_scaled)
+                        methods_models["DEC"] = model
+                    except Exception as e:
+                        st.warning(f"DEC failed: {e}")
+                        methods_labels["DEC"] = np.zeros(len(X_scaled))
+                    current += 1
+                    progress_bar.progress(current / total_methods)
+                    
+                    st.write("Running IDEC (Deep Learning)...")
+                    try:
+                        model = IDECClustering(n_clusters=n_clusters, pretrain_epochs=10, clustering_epochs=20)
+                        methods_labels["IDEC"] = model.fit_predict(X_scaled)
+                        methods_models["IDEC"] = model
+                    except Exception as e:
+                        st.warning(f"IDEC failed: {e}")
+                        methods_labels["IDEC"] = np.zeros(len(X_scaled))
+                    current += 1
+                    progress_bar.progress(current / total_methods)
+                    
+                    st.write("Running DCN (Deep Learning)...")
+                    try:
+                        model = DCNClustering(n_clusters=n_clusters, pretrain_epochs=10, clustering_epochs=20)
+                        methods_labels["DCN"] = model.fit_predict(X_scaled)
+                        methods_models["DCN"] = model
+                    except Exception as e:
+                        st.warning(f"DCN failed: {e}")
+                        methods_labels["DCN"] = np.zeros(len(X_scaled))
+                    current += 1
+                    progress_bar.progress(current / total_methods)
+                    
+                    st.write("Running HDBSCAN (Auto-k)...")
                     model = HDBSCANClustering(min_cluster_size=hdbscan_min_size)
-                elif method == "GMM (Auto-BIC)":
+                    methods_labels["HDBSCAN"] = model.fit_predict(X_scaled)
+                    methods_models["HDBSCAN"] = model
+                    current += 1
+                    progress_bar.progress(current / total_methods)
+                    
+                    st.write("Running GMM Auto-BIC (Auto-k)...")
                     model = GMMAutoClustering(max_k=10)
+                    methods_labels["GMM Auto-BIC"] = model.fit_predict(X_scaled)
+                    methods_models["GMM Auto-BIC"] = model
+                    current += 1
+                    progress_bar.progress(current / total_methods)
+                    
+                    progress_bar.progress(1.0)
+                    st.success("✅ All algorithms completed!")
+                    
+                    # Generate comparison table
+                    comparison_df = compare_clustering_methods(X_scaled, methods_labels=methods_labels)
+                    
+                    # Sort by silhouette score (descending)
+                    comparison_sorted = comparison_df.sort_values('silhouette', ascending=False)
+                    
+                    # Select best method based on Silhouette score for subsequent tabs
+                    best_method_name = comparison_sorted.iloc[0]['Method']
+                    best_labels = methods_labels[best_method_name]
+                    best_model = methods_models[best_method_name]
+                    
+                    # Store best method in session state for other tabs
+                    st.session_state.labels = best_labels
+                    st.session_state.model = best_model
+                    st.session_state.method = f"{best_method_name} (Best from Comparison)"
+                    
+                    # Store comparison results in session state
+                    st.session_state.comparison_df = comparison_df
+                    st.session_state.methods_labels = methods_labels
+                    st.session_state.methods_models = methods_models
+                    
+                    # Display results
+                    st.subheader("📊 Comparative Analysis")
+                    
+                    # Highlight best method for each metric
+                    def highlight_best(s):
+                        if s.name == 'silhouette':
+                            return ['background-color: lightgreen' if v == s.max() else '' for v in s]
+                        elif s.name == 'davies_bouldin':
+                            return ['background-color: lightgreen' if v == s.min() else '' for v in s]
+                        elif s.name == 'calinski_harabasz':
+                            return ['background-color: lightgreen' if v == s.max() else '' for v in s]
+                        else:
+                            return ['' for _ in s]
+                    
+                    # Format and display
+                    styled_df = comparison_sorted.style.format({
+                        'silhouette': '{:.3f}',
+                        'davies_bouldin': '{:.3f}',
+                        'calinski_harabasz': '{:.1f}',
+                    }).apply(highlight_best, subset=['silhouette', 'davies_bouldin', 'calinski_harabasz'])
+                    
+                    st.dataframe(styled_df, use_container_width=True)
+                    
+                    # Recommendations
+                    best_silhouette = comparison_sorted.iloc[0]['Method']
+                    best_db = comparison_df.loc[comparison_df['davies_bouldin'].idxmin(), 'Method']
+                    best_ch = comparison_df.loc[comparison_df['calinski_harabasz'].idxmax(), 'Method']
+                    
+                    st.subheader("🏆 Recommendations")
+                    col_rec1, col_rec2, col_rec3 = st.columns(3)
+                    with col_rec1:
+                        st.metric(
+                            "🥇 Best Silhouette", 
+                            best_silhouette,
+                            f"{comparison_df[comparison_df['Method']==best_silhouette]['silhouette'].values[0]:.3f}"
+                        )
+                    with col_rec2:
+                        st.metric(
+                            "🥇 Best Davies-Bouldin", 
+                            best_db,
+                            f"{comparison_df[comparison_df['Method']==best_db]['davies_bouldin'].values[0]:.3f}"
+                        )
+                    with col_rec3:
+                        st.metric(
+                            "🥇 Best Calinski-Harabasz", 
+                            best_ch,
+                            f"{comparison_df[comparison_df['Method']==best_ch]['calinski_harabasz'].values[0]:.1f}"
+                        )
+                    
+                    # Visual comparison (always shown)
+                    st.subheader("📈 Visual Comparison")
+                    fig_comp, _ = plot_cluster_comparison(
+                        comparison_sorted, 
+                        metrics=['silhouette', 'davies_bouldin', 'calinski_harabasz']
+                    )
+                    st.pyplot(fig_comp)
+                    
+                    st.success(f"✅ **{best_method_name}** selected for subsequent analysis tabs (best Silhouette score)")
+                    
+                    # Display metrics for the selected best method
+                    st.subheader(f"📊 {best_method_name} - Detailed Metrics")
+                    valid_mask = best_labels >= 0
+                    if valid_mask.sum() > 0 and len(set(best_labels[valid_mask])) > 1:
+                        metrics = compute_internal_metrics(X_scaled[valid_mask], best_labels[valid_mask])
 
-                labels = model.fit_predict(X_scaled)
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Silhouette Score", f"{metrics['silhouette']:.3f}")
+                            st.caption("[-1, 1] — higher is better")
+                        with col2:
+                            st.metric("Davies-Bouldin Index", f"{metrics['davies_bouldin']:.3f}")
+                            st.caption("[0, inf] — lower is better")
+                        with col3:
+                            st.metric("Calinski-Harabasz", f"{metrics['calinski_harabasz']:.1f}")
+                            st.caption("[0, inf] — higher is better")
 
-                st.session_state.labels = labels
-                st.session_state.model = model
-                st.session_state.method = method
+                    # Display cluster distribution
+                    st.subheader("Cluster Distribution")
+                    n_found = len(set(best_labels) - {-1})
+                    noise_count = int(np.sum(best_labels == -1))
+                    unique, counts = np.unique(best_labels[best_labels >= 0], return_counts=True)
+                    cluster_dist = pd.DataFrame({
+                        'Cluster': unique,
+                        'Count': counts,
+                        'Percentage': (counts / len(best_labels) * 100).round(1)
+                    })
+                    if noise_count:
+                        noise_row = pd.DataFrame([{'Cluster': -1, 'Count': noise_count,
+                                                   'Percentage': round(noise_count / len(best_labels) * 100, 1)}])
+                        cluster_dist = pd.concat([cluster_dist, noise_row], ignore_index=True)
+                    st.dataframe(cluster_dist)
+                    
+                    st.info("💡 **Tip:** This method will be used in the Visualization, Explainability, and Counterfactual tabs. "
+                           "You can view individual cluster details for this method in the following tabs.")
+                    
+            else:
+                # Single method mode (original behavior)
+                with st.spinner(f"Running {method}..."):
+                    if method == "K-Means":
+                        model = KMeansClustering(n_clusters=n_clusters)
+                    elif method == "Hierarchical":
+                        model = HierarchicalClustering(n_clusters=n_clusters)
+                    elif method == "K-Medoids":
+                        model = KMedoidsClustering(n_clusters=n_clusters)
+                    elif method == "GMM":
+                        model = GMMClustering(n_components=n_clusters)
+                    elif method == "Spectral":
+                        model = SpectralClusteringWrapper(n_clusters=n_clusters)
+                    elif method == "DEC":
+                        model = DECClustering(n_clusters=n_clusters, pretrain_epochs=10, clustering_epochs=20)
+                    elif method == "IDEC":
+                        model = IDECClustering(n_clusters=n_clusters, pretrain_epochs=10, clustering_epochs=20)
+                    elif method == "DCN":
+                        model = DCNClustering(n_clusters=n_clusters, pretrain_epochs=10, clustering_epochs=20)
+                    elif method == "HDBSCAN":
+                        model = HDBSCANClustering(min_cluster_size=hdbscan_min_size)
+                    elif method == "GMM (Auto-BIC)":
+                        model = GMMAutoClustering(max_k=10)
 
-                n_found = len(set(labels) - {-1})
-                noise_count = int(np.sum(labels == -1))
+                    labels = model.fit_predict(X_scaled)
 
-                if method == "HDBSCAN":
-                    st.success(f"HDBSCAN found **{n_found} clusters** automatically." +
-                               (f" {noise_count} patient(s) marked as noise (outliers)." if noise_count else ""))
-                elif method == "GMM (Auto-BIC)":
-                    st.success(f"GMM (Auto-BIC) selected **k = {model.best_k_}** clusters automatically.")
-                else:
-                    st.success(f"{method} clustering complete — {len(np.unique(labels))} clusters found")
+                    st.session_state.labels = labels
+                    st.session_state.model = model
+                    st.session_state.method = method
 
-                # Only compute metrics on non-noise points
-                valid_mask = labels >= 0
-                if valid_mask.sum() > 0 and len(set(labels[valid_mask])) > 1:
-                    metrics = compute_internal_metrics(X_scaled[valid_mask], labels[valid_mask])
+                    n_found = len(set(labels) - {-1})
+                    noise_count = int(np.sum(labels == -1))
 
-                    st.subheader("Clustering Metrics")
-                    col1, col2, col3 = st.columns(3)
-                    with col1:
-                        st.metric("Silhouette Score", f"{metrics['silhouette']:.3f}")
-                        st.caption("[-1, 1] — higher is better")
-                    with col2:
-                        st.metric("Davies-Bouldin Index", f"{metrics['davies_bouldin']:.3f}")
-                        st.caption("[0, inf] — lower is better")
-                    with col3:
-                        st.metric("Calinski-Harabasz", f"{metrics['calinski_harabasz']:.1f}")
-                        st.caption("[0, inf] — higher is better")
+                    if method == "HDBSCAN":
+                        st.success(f"HDBSCAN found **{n_found} clusters** automatically." +
+                                   (f" {noise_count} patient(s) marked as noise (outliers)." if noise_count else ""))
+                    elif method == "GMM (Auto-BIC)":
+                        st.success(f"GMM (Auto-BIC) selected **k = {model.best_k_}** clusters automatically.")
+                    else:
+                        st.success(f"{method} clustering complete — {len(np.unique(labels))} clusters found")
 
-                st.subheader("Cluster Distribution")
-                unique, counts = np.unique(labels[labels >= 0], return_counts=True)
-                cluster_dist = pd.DataFrame({
-                    'Cluster': unique,
-                    'Count': counts,
-                    'Percentage': (counts / len(labels) * 100).round(1)
-                })
-                if noise_count:
-                    noise_row = pd.DataFrame([{'Cluster': -1, 'Count': noise_count,
-                                               'Percentage': round(noise_count / len(labels) * 100, 1)}])
-                    cluster_dist = pd.concat([cluster_dist, noise_row], ignore_index=True)
-                st.dataframe(cluster_dist)
+                    # Only compute metrics on non-noise points
+                    valid_mask = labels >= 0
+                    if valid_mask.sum() > 0 and len(set(labels[valid_mask])) > 1:
+                        metrics = compute_internal_metrics(X_scaled[valid_mask], labels[valid_mask])
 
-                st.subheader("Cluster Profiles")
-                profiles = profile_clusters(df_imputed[valid_mask], labels[valid_mask], st.session_state.selected_features)
-                st.dataframe(profiles.round(2))
+                        st.subheader("Clustering Metrics")
+                        col1, col2, col3 = st.columns(3)
+                        with col1:
+                            st.metric("Silhouette Score", f"{metrics['silhouette']:.3f}")
+                            st.caption("[-1, 1] — higher is better")
+                        with col2:
+                            st.metric("Davies-Bouldin Index", f"{metrics['davies_bouldin']:.3f}")
+                            st.caption("[0, inf] — lower is better")
+                        with col3:
+                            st.metric("Calinski-Harabasz", f"{metrics['calinski_harabasz']:.1f}")
+                            st.caption("[0, inf] — higher is better")
+
+                    st.subheader("Cluster Distribution")
+                    unique, counts = np.unique(labels[labels >= 0], return_counts=True)
+                    cluster_dist = pd.DataFrame({
+                        'Cluster': unique,
+                        'Count': counts,
+                        'Percentage': (counts / len(labels) * 100).round(1)
+                    })
+                    if noise_count:
+                        noise_row = pd.DataFrame([{'Cluster': -1, 'Count': noise_count,
+                                                   'Percentage': round(noise_count / len(labels) * 100, 1)}])
+                        cluster_dist = pd.concat([cluster_dist, noise_row], ignore_index=True)
+                    st.dataframe(cluster_dist)
+
+                    st.subheader("Cluster Profiles")
+                    profiles = profile_clusters(df_imputed[valid_mask], labels[valid_mask], st.session_state.selected_features)
+                    st.dataframe(profiles.round(2))
 
 # TAB 4: Visualization
 with tab4:
