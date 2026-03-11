@@ -40,7 +40,7 @@ X-Insight is a research platform designed to provide transparent and interpretab
 
 ## Key Features
 
-🔬 **11 Clustering Algorithms** — From traditional (K-Means, Hierarchical) to deep learning (DEC, IDEC, DCN), including auto-k methods (HDBSCAN, GMM-Auto)
+🔬 **10 Clustering Algorithms** — From traditional (K-Means, Hierarchical) to deep learning (DEC, IDEC, DCN), including auto-k methods (HDBSCAN, GMM-Auto)
 
 🔍 **Multi-Level Explainability** — Global feature importance, local patient-level explanations (SHAP, LIME), and counterfactual scenarios
 
@@ -314,7 +314,7 @@ pytest tests/ -v
 ### Implemented
 - ✅ Complete data preprocessing pipeline (KNN imputation, encoding, scaling)
 - ✅ Multi-format data import (CSV, Excel .xlsx/.xls)
-- ✅ **11 clustering algorithms** — 9 manual-k + 2 true auto-k (HDBSCAN, GMM-Auto)
+- ✅ **10 clustering algorithms** — 8 manual-k + 2 true auto-k (HDBSCAN, GMM-Auto)
 - ✅ Elbow curve guidance for manual-k methods
 - ✅ Deep clustering methods via ClustPy (DEC, IDEC, DCN)
 - ✅ Comprehensive validation metrics with noise-aware evaluation
@@ -337,18 +337,6 @@ This platform was developed for the analysis of Systemic Sclerosis (SSc) clinica
 - **Understand cluster assignments** through interpretable explanations
 - **Explore interventions** via counterfactual scenarios
 - **Communicate results** with AI-generated natural language summaries
-
-## Citation
-
-If you use X-Insight in your research, please cite:
-
-```
-@software{x_insight,
-  title = {X-Insight: Explainable AI Platform for Unsupervised Learning on Clinical Data},
-  year = {2026},
-  url = {https://github.com/yourusername/x-insight}
-}
-```
 
 ## Contributing
 
@@ -373,6 +361,9 @@ pytest tests/ -v --cov=src
 # Format code
 black src/ tests/
 ```
+## Supervision
+This work was supervised by Prof Zaineb GARCIA, Univ. Lille, CNRS, Inria, Centrale Lille, UMR  9189 CRIStAL, F-59000 Lille, France
+
 
 ## Contact
 
