@@ -364,6 +364,8 @@ black src/ tests/
 ## Supervision
 This work was supervised by Prof Zaineb GARCIA, Univ. Lille, CNRS, Inria, Centrale Lille, UMR  9189 CRIStAL, F-59000 Lille, France
 
+## Submission
+X-insight is submitted to ECML-PKDD'2026 - DEMO Track
 
 ## Contact
 
