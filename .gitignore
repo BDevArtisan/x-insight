@@ -221,5 +221,6 @@ $RECYCLE.BIN/
 # Project-specific
 data/*.pkl
 data/*.csv
+docs_xi/
 
 # End of https://www.toptal.com/developers/gitignore/api/python,visualstudiocode,windows
