@@ -364,8 +364,11 @@ black src/ tests/
 ## Supervision
 This work was supervised by Prof Zaineb GARCIA, Univ. Lille, CNRS, Inria, Centrale Lille, UMR  9189 CRIStAL, F-59000 Lille, France
 
-## Submission
-X-insight is submitted to ECML-PKDD'2026 - DEMO Track
+## Citation
+X-insight is accepted to ECML-PKDD'2026 - DEMO Track
+
+## Acknowledgments
+This work is part of a project that has received funding from the European Union’s Horizon Europe Research and Innovation Programme under the Marie Skłodowska-Curie Actions (MSCA), Grant Agreement No. 101236749. For further information, please visit the [THUNDER project website](https://thunder-msca-se.univ-lille.fr/).
 
 ## Contact
 
